@@ -1,0 +1,221 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: organisations
+    // Fields:
+    //   - nom: string (1-100 chars)
+    //   - siret: string (14 chars)
+    //   - email_admin: string (valid email)
+    //   - regime_tva: string (enum: franchise, reel)
+    //   - statut: string (enum: actif, inactif)
+    //
+    // Collection: entreprises
+    // Fields:
+    //   - nom: string (1-200 chars)
+    //   - siret: string (optional, 14 chars)
+    //   - tva_intracom: string (optional)
+    //   - pays: string (2 chars ISO)
+    //   - adresse: string (1-500 chars)
+    //
+    // Collection: factures
+    // Fields:
+    //   - organisation_id: string (FK to organisations)
+    //   - numero_facture: string (1-50 chars)
+    //   - date_emission: string (ISO date)
+    //   - emetteur_id: string (FK to entreprises)
+    //   - destinataire_id: string (FK to entreprises)
+    //   - montant_ht_eur: number (positive)
+    //   - montant_ttc_eur: number (positive)
+    //   - statut: string (enum: cree, valide, alloue, bloque, archive)
+    //   - score_qualite: number (0-100)
+    //   - est_conforme: bool
+    //   - author_uid: string (owner)
+    //
+    // Collection: journal
+    // Fields:
+    //   - organisation_id: string
+    //   - date_ecriture: string (ISO date)
+    //   - compte_id: string (PCG code)
+    //   - debit: number
+    //   - credit: number
+    //   - statut: string (enum: cree, valide, reconcilie)
+    //
+    // Collection: subreddits
+    // Fields:
+    //   - nom: string (1-50 chars)
+    //   - description: string (1-500 chars)
+    //   - createur_id: string (owner)
+    //
+    // Collection: posts
+    // Fields:
+    //   - subreddit: string
+    //   - auteurId: string (owner)
+    //   - auteur: string
+    //   - titre: string (1-300 chars)
+    //   - contenu: string (1-10000 chars)
+    //   - votes: number
+    //   - comments: number
+    //
+    // Collection: comments
+    // Fields:
+    //   - postId: string
+    //   - auteurId: string (owner)
+    //   - auteur: string
+    //   - contenu: string
+    //
+    // Collection: posts/{postId}/votes
+    // Fields:
+    //   - value: number (1 or -1)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email in ["thepastorsun@gmail.com", "mcguy2008@gmail.com"] && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDate(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function uidUnchanged() {
+      return !('author_uid' in request.resource.data) || request.resource.data.author_uid == request.auth.uid;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidOrganisation(data) {
+      return data.nom is string && data.nom.size() <= 100 &&
+             data.siret is string && (data.siret.size() == 0 || data.siret.size() == 14) &&
+             (data.email_admin == "" || isValidEmail(data.email_admin)) &&
+             data.regime_tva in ['franchise', 'reel'] &&
+             data.statut in ['actif', 'inactif'];
+    }
+
+    function isValidFacture(data) {
+      return data.numero_facture is string && data.numero_facture.size() >= 1 && data.numero_facture.size() <= 50 &&
+             isValidDate(data.date_emission) &&
+             data.montant_ht_eur is number && data.montant_ht_eur >= 0 &&
+             data.montant_ttc_eur is number && data.montant_ttc_eur >= 0 &&
+             data.statut in ['cree', 'valide', 'alloue', 'rapproche', 'bloque', 'archive'] &&
+             (!('score_qualite' in data) || (data.score_qualite is number && data.score_qualite >= 0 && data.score_qualite <= 100)) &&
+             (!('est_conforme' in data) || data.est_conforme is bool);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /organisations/{orgId} {
+      allow read: if isAuthenticated();
+      allow create, update: if (isAdmin() || isOwner(orgId)) && isValidOrganisation(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /entreprises/{entId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.nom is string && request.resource.data.nom.size() <= 200;
+    }
+
+    match /factures/{factId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidFacture(request.resource.data) && uidUnchanged();
+      allow update: if isAuthenticated() && isValidFacture(request.resource.data) && (isAdmin() || request.auth.uid == resource.data.author_uid);
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.author_uid);
+    }
+
+    match /journal/{entryId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.compte_id is string;
+      allow delete: if isAuthenticated();
+    }
+
+    match /lignes_releve/{ligneId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.organisation_id is string;
+      allow delete: if isAuthenticated();
+    }
+
+    match /subreddits/{subId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.nom.size() <= 50;
+      allow update, delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.createur_id);
+    }
+
+    function isPostVoteUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes']) &&
+             (request.resource.data.votes - resource.data.votes == 1 || request.resource.data.votes - resource.data.votes == -1 || request.resource.data.votes - resource.data.votes == 2 || request.resource.data.votes - resource.data.votes == -2);
+    }
+
+    function isPostCommentUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['comments']) &&
+             (request.resource.data.comments - resource.data.comments == 1 || request.resource.data.comments - resource.data.comments == -1);
+    }
+
+    match /posts/{postId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.titre.size() <= 300 && (!('auteurId' in request.resource.data) || request.resource.data.auteurId == request.auth.uid);
+      allow update: if isAuthenticated() && (
+        (request.auth.uid == resource.data.auteurId) || 
+        isAdmin() || 
+        isPostVoteUpdate() ||
+        isPostCommentUpdate()
+      );
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.auteurId);
+      
+      match /votes/{userId} {
+        allow read: if true;
+        allow create, update: if isOwner(userId) && request.resource.data.value in [1, -1];
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    match /comments/{commentId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.resource.data.contenu.size() <= 5000 && (!('auteurId' in request.resource.data) || request.resource.data.auteurId == request.auth.uid);
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.auteurId || isAdmin());
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == resource.data.auteurId);
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isOwner(userId) || isAdmin();
+    }
+
+    match /settings/{settingId} {
+      allow read, write: if isAuthenticated() && settingId.matches(request.auth.uid + "_.*");
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

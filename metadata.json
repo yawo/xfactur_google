@@ -1,0 +1,8 @@
+{
+  "name": "Xfactur",
+  "description": "Solution française de traitement intelligent de facturation : extraction IA, allocation PCG, réconciliation bancaire et analytics financiers.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

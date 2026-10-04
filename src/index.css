@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@import "jspreadsheet-ce/dist/jspreadsheet.css";
+@import "jsuites/dist/jsuites.css";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-neutral-50 text-neutral-900;
+  }
+}

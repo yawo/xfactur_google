@@ -1,0 +1,189 @@
+{
+  "entities": {
+    "Organisation": {
+      "title": "Organisation",
+      "description": "Une entité organisationnelle (entreprise cliente)",
+      "type": "object",
+      "properties": {
+        "nom": { "type": "string" },
+        "siret": { "type": "string" },
+        "email_admin": { "type": "string", "format": "email" },
+        "regime_tva": { "type": "string", "enum": ["franchise", "reel"] },
+        "statut": { "type": "string", "enum": ["actif", "inactif"] }
+      },
+      "required": ["nom", "siret", "email_admin"]
+    },
+    "Entreprise": {
+      "title": "Entreprise",
+      "description": "Une entreprise (émetteur ou destinataire)",
+      "type": "object",
+      "properties": {
+        "siret": { "type": "string" },
+        "nom": { "type": "string" },
+        "tva_intracom": { "type": "string" },
+        "pays": { "type": "string" },
+        "adresse": { "type": "string" }
+      },
+      "required": ["nom"]
+    },
+    "Facture": {
+      "title": "Facture",
+      "description": "Une facture canonique",
+      "type": "object",
+      "properties": {
+        "organisation_id": { "type": "string" },
+        "numero_facture": { "type": "string" },
+        "date_emission": { "type": "string", "format": "date" },
+        "emetteur_id": { "type": "string" },
+        "destinataire_id": { "type": "string" },
+        "montant_ht_eur": { "type": "number" },
+        "montant_ttc_eur": { "type": "number" },
+        "statut": { "type": "string", "enum": ["cree", "valide", "alloue", "bloque", "archive"] },
+        "score_qualite": { "type": "number" },
+        "est_conforme": { "type": "boolean" }
+      },
+      "required": ["organisation_id", "numero_facture", "date_emission", "statut"]
+    },
+    "Journal": {
+      "title": "Ecriture Comptable",
+      "description": "Une ligne d'écriture au journal",
+      "type": "object",
+      "properties": {
+        "organisation_id": { "type": "string" },
+        "facture_id": { "type": "string" },
+        "date_ecriture": { "type": "string", "format": "date" },
+        "compte_id": { "type": "string" },
+        "debit": { "type": "number" },
+        "credit": { "type": "number" },
+        "statut": { "type": "string", "enum": ["cree", "valide", "reconcilie"] }
+      },
+      "required": ["organisation_id", "date_ecriture", "compte_id"]
+    },
+    "Releve": {
+      "title": "Relevé Bancaire",
+      "description": "Un relevé bancaire",
+      "type": "object",
+      "properties": {
+        "organisation_id": { "type": "string" },
+        "banque": { "type": "string" },
+        "date_releve": { "type": "string", "format": "date" }
+      },
+      "required": ["organisation_id", "banque", "date_releve"]
+    },
+    "LigneReleve": {
+      "title": "Ligne de Relevé",
+      "description": "Une opération bancaire",
+      "type": "object",
+      "properties": {
+        "releve_id": { "type": "string" },
+        "date_operation": { "type": "string", "format": "date" },
+        "montant": { "type": "number" },
+        "libelle": { "type": "string" },
+        "statut": { "type": "string", "enum": ["cree", "valide", "reconcilie"] }
+      },
+      "required": ["releve_id", "date_operation", "montant", "libelle"]
+    },
+    "Subreddit": {
+      "title": "Subreddit",
+      "description": "Un espace de discussion thématique",
+      "type": "object",
+      "properties": {
+        "nom": { "type": "string" },
+        "description": { "type": "string" },
+        "createur_id": { "type": "string" }
+      },
+      "required": ["nom", "createur_id"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Une publication dans un subreddit",
+      "type": "object",
+      "properties": {
+        "subreddit": { "type": "string" },
+        "auteurId": { "type": "string" },
+        "auteur": { "type": "string" },
+        "titre": { "type": "string" },
+        "contenu": { "type": "string" },
+        "votes": { "type": "number" },
+        "comments": { "type": "number" }
+      },
+      "required": ["subreddit", "auteurId", "titre"]
+    },
+    "BankStatement": {
+      "title": "BankStatement",
+      "description": "A bank statement transaction",
+      "type": "object",
+      "properties": {
+        "organisation_id": {
+          "type": "string",
+          "description": "The ID of the organization this statement belongs to"
+        },
+        "date_operation": {
+          "type": "string",
+          "format": "date",
+          "description": "The date of the transaction"
+        },
+        "libelle": {
+          "type": "string",
+          "description": "The description of the transaction"
+        },
+        "montant_eur": {
+          "type": "number",
+          "description": "The amount in EUR (negative for expenses, positive for income)"
+        },
+        "statut": {
+          "type": "string",
+          "enum": ["attente", "rapproche"],
+          "description": "The reconciliation status"
+        },
+        "journal_id": {
+          "type": "string",
+          "description": "The ID of the reconciled journal entry"
+        },
+        "score_ia": {
+          "type": "number",
+          "description": "The AI matching score"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The timestamp when the document was created"
+        }
+      },
+      "required": ["organisation_id", "date_operation", "libelle", "montant_eur", "statut"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Un commentaire sur un post",
+      "type": "object",
+      "properties": {
+        "postId": { "type": "string" },
+        "auteurId": { "type": "string" },
+        "auteur": { "type": "string" },
+        "contenu": { "type": "string" }
+      },
+      "required": ["postId", "auteurId", "contenu"]
+    },
+    "Vote": {
+      "title": "Vote",
+      "description": "Un vote sur un post",
+      "type": "object",
+      "properties": {
+        "value": { "type": "number", "enum": [1, -1] }
+      },
+      "required": ["value"]
+    }
+  },
+  "firestore": {
+    "/organisations": { "schema": "Organisation", "description": "Liste des organisations clientes" },
+    "/entreprises": { "schema": "Entreprise", "description": "Référentiel des entreprises" },
+    "/factures": { "schema": "Facture", "description": "Factures traitées" },
+    "/journal": { "schema": "Journal", "description": "Ecritures comptables" },
+    "/releves": { "schema": "Releve", "description": "Relevés bancaires" },
+    "/lignes_releve": { "schema": "LigneReleve", "description": "Lignes de relevés" },
+    "/subreddits": { "schema": "Subreddit", "description": "Espaces de discussion" },
+    "/posts": { "schema": "Post", "description": "Publications" },
+    "/comments": { "schema": "Comment", "description": "Commentaires des posts" },
+    "/posts/{postId}/votes/{userId}": { "schema": "Vote", "description": "Votes des utilisateurs" }
+  }
+}
