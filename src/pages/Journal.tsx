@@ -1,31 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { BookOpen, AlertCircle, CheckCircle2, Download, Loader2, Plus } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { BookOpen, AlertCircle, CheckCircle2, Download, Loader2, Plus, Globe2 } from 'lucide-react';
 import Spreadsheet from '../components/Spreadsheet';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, serverTimestamp } from 'firebase/firestore';
-
 import { AuthProvider, useAuth } from '../AuthContext';
-
-const columns = [
-  { type: 'text', title: 'ID', width: 0, readOnly: true },
-  { type: 'calendar', title: 'Date', width: 100, options: { format: 'YYYY-MM-DD' } },
-  { type: 'text', title: 'Compte', width: 80 },
-  { type: 'text', title: 'Libellé Compte', width: 150 },
-  { type: 'numeric', title: 'Débit (€)', width: 100, mask: '#.##0,00' },
-  { type: 'numeric', title: 'Crédit (€)', width: 100, mask: '#.##0,00' },
-  { type: 'text', title: 'Pièce', width: 100 },
-  { type: 'text', title: 'Libellé Ecriture', width: 150 },
-  { type: 'text', title: 'Statut', width: 100, readOnly: true },
-  { type: 'text', title: 'Opération Banque', width: 150, readOnly: true },
-  { type: 'numeric', title: 'Montant Banque', width: 100, readOnly: true },
-];
+import { useAccounting } from '../AccountingContext';
+import { cn } from '../lib/utils';
 
 export default function Journal() {
   const { user } = useAuth();
+  const { standard, setStandard, currencySymbol, isOHADA } = useAccounting();
   const [data, setData] = useState<any[][]>([]);
   const [loading, setLoading] = useState(true);
   const [ecarts, setEcarts] = useState<any[]>([]);
   const [applying, setApplying] = useState<string | null>(null);
+
+  const columns = useMemo(() => [
+    { type: 'text', title: 'ID', width: 0, readOnly: true },
+    { type: 'calendar', title: 'Date', width: 100, options: { format: 'YYYY-MM-DD' } },
+    { type: 'text', title: 'Compte', width: 90 },
+    { type: 'text', title: 'Libellé Compte', width: 180 },
+    { type: 'numeric', title: `Débit (${currencySymbol})`, width: 110, mask: '#.##0,00' },
+    { type: 'numeric', title: `Crédit (${currencySymbol})`, width: 110, mask: '#.##0,00' },
+    { type: 'text', title: 'Pièce', width: 100 },
+    { type: 'text', title: 'Libellé Ecriture', width: 160 },
+    { type: 'text', title: 'Statut', width: 100, readOnly: true },
+    { type: 'text', title: 'Opération Banque', width: 150, readOnly: true },
+    { type: 'numeric', title: `Montant Banque (${currencySymbol})`, width: 120, readOnly: true },
+  ], [currencySymbol]);
   
   const [journalEntries, setJournalEntries] = useState<any[]>([]);
   const [releveEntries, setReleveEntries] = useState<any[]>([]);
@@ -88,12 +90,16 @@ export default function Journal() {
       
       const lines = [];
       
+      // Default bank account based on standard
+      const defaultBanqueCompte = isOHADA ? '521100' : '512100';
+      const defaultBanqueLibelle = isOHADA ? 'Banques locales (OHADA)' : 'Banque (PCG)';
+      
       // Bank line
       lines.push([
         r.id + '_bank',
         r.date_operation || '',
-        r.compte_banque || '512100',
-        'Banque',
+        r.compte_banque || defaultBanqueCompte,
+        defaultBanqueLibelle,
         isExpense ? '0.00' : amount.toFixed(2),
         isExpense ? amount.toFixed(2) : '0.00',
         r.piece_comptable || '',
@@ -105,7 +111,9 @@ export default function Journal() {
 
       // Counterpart line
       const thirdPartyLine = journalEntries.find(j => j.piece === r.piece_comptable && j.compte_id && j.compte_id.startsWith('4'));
-      const compteCounterpart = thirdPartyLine ? thirdPartyLine.compte_id : (isExpense ? '401000' : '411000');
+      const defaultSupplierCompte = isOHADA ? '401100' : '401000';
+      const defaultCustomerCompte = isOHADA ? '411100' : '411000';
+      const compteCounterpart = thirdPartyLine ? thirdPartyLine.compte_id : (isExpense ? defaultSupplierCompte : defaultCustomerCompte);
       const libelleCounterpart = thirdPartyLine ? thirdPartyLine.libelle_compte : (isExpense ? 'Fournisseurs' : 'Clients');
 
       lines.push([
@@ -136,6 +144,7 @@ export default function Journal() {
     ).map(l => {
       const diff = Math.abs(l.montant || 0) - Math.abs(l.montant_comptable || 0);
       const isExpense = (l.montant || 0) < 0;
+      const bankAcc = l.compte_banque || (isOHADA ? '521100' : '512100');
       
       let compteDebit = '';
       let compteCredit = '';
@@ -145,31 +154,31 @@ export default function Journal() {
 
       if (isExpense) {
         if (diff > 0) {
-          compteDebit = '627000';
-          libelleCompteDebit = 'Services bancaires et assimilés';
-          compteCredit = l.compte_banque || '512100';
+          compteDebit = isOHADA ? '631100' : '627000';
+          libelleCompteDebit = isOHADA ? 'Frais bancaires (SYSCOHADA)' : 'Services bancaires et assimilés';
+          compteCredit = bankAcc;
           libelleCompteCredit = 'Banque';
           type = 'Frais bancaires';
         } else {
-          compteDebit = '401000';
+          compteDebit = isOHADA ? '401100' : '401000';
           libelleCompteDebit = 'Fournisseurs';
-          compteCredit = '765000';
+          compteCredit = isOHADA ? '773000' : '765000';
           libelleCompteCredit = 'Escomptes obtenus';
           type = 'Escompte obtenu';
         }
       } else {
         if (diff > 0) {
-          compteDebit = l.compte_banque || '512100';
+          compteDebit = bankAcc;
           libelleCompteDebit = 'Banque';
-          compteCredit = '766000';
+          compteCredit = isOHADA ? '774000' : '766000';
           libelleCompteCredit = 'Gains de change';
           type = 'Gain de change';
         } else {
-          compteDebit = '622500';
+          compteDebit = isOHADA ? '632100' : '622500';
           libelleCompteDebit = 'Commissions et courtages';
-          compteCredit = '411000';
+          compteCredit = isOHADA ? '411100' : '411000';
           libelleCompteCredit = 'Clients';
-          type = 'Commission (ex: Stripe)';
+          type = 'Commission de paiement';
         }
       }
 
@@ -188,7 +197,7 @@ export default function Journal() {
     });
 
     setEcarts(newEcarts);
-  }, [journalEntries, releveEntries]);
+  }, [journalEntries, releveEntries, isOHADA]);
 
   const handleApplySuggestion = async (ecart: any) => {
     if (!user) return;
@@ -267,16 +276,48 @@ export default function Journal() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? 'Référentiel SYSCOHADA Révisé' : 'Référentiel PCG France 2026'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Journal Général</h1>
-          <p className="text-neutral-500">Consultez le journal final et traitez les écarts de rapprochement.</p>
+          <p className="text-neutral-500">
+            Consultez le grand livre / journal ({isOHADA ? 'SYSCOHADA' : 'PCG'}) et traitez les écarts de rapprochement.
+          </p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
           <button 
             onClick={handleExportFEC}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors shadow-sm"
           >
             <Download className="w-4 h-4" />
-            Export FEC
+            Export FEC / Grand Livre
           </button>
         </div>
       </header>

@@ -1,28 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Banknote, Search, Filter, Save, Download, CheckCircle2, AlertCircle, ArrowRightLeft, Loader2, Upload, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Banknote, Search, Filter, Save, Download, CheckCircle2, AlertCircle, ArrowRightLeft, Loader2, Upload, Trash2, Globe2 } from 'lucide-react';
 import Spreadsheet, { SpreadsheetRef } from '../components/Spreadsheet';
 import MarkdownEditorModal from '../components/MarkdownEditorModal';
 import { motion } from 'motion/react';
+import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, getDocs, deleteDoc, getDoc } from 'firebase/firestore';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { aiService } from '../services/aiService';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
-const columns = [
-  { type: 'text', title: 'ID Ligne', width: 0, readOnly: true }, // Hidden
-  { type: 'calendar', title: 'Date Opération', width: 120, options: { format: 'YYYY-MM-DD' } },
-  { type: 'text', title: 'Libellé Bancaire', width: 250 },
-  { type: 'numeric', title: 'Montant Banque (€)', width: 120, mask: '#.##0,00' },
-  { type: 'text', title: 'Pièce Comptable', width: 150 },
-  { type: 'numeric', title: 'Montant Comptable (€)', width: 120, mask: '#.##0,00' },
-  { type: 'dropdown', title: 'Statut', width: 100, source: ['ATTENTE', 'OK', 'ECART'] },
-  { type: 'text', title: 'Score IA', width: 100, readOnly: true },
-];
-
 export default function Reconciliation() {
   const { user } = useAuth();
+  const { standard, setStandard, currencySymbol, isOHADA, pays } = useAccounting();
+
+  const columns = useMemo(() => [
+    { type: 'text', title: 'ID Ligne', width: 0, readOnly: true }, // Hidden
+    { type: 'calendar', title: 'Date Opération', width: 120, options: { format: 'YYYY-MM-DD' } },
+    { type: 'text', title: 'Libellé Bancaire', width: 250 },
+    { type: 'numeric', title: `Montant Banque (${currencySymbol})`, width: 120, mask: '#.##0,00' },
+    { type: 'text', title: 'Pièce Comptable', width: 150 },
+    { type: 'numeric', title: `Montant Comptable (${currencySymbol})`, width: 120, mask: '#.##0,00' },
+    { type: 'dropdown', title: 'Statut', width: 100, source: ['ATTENTE', 'OK', 'ECART'] },
+    { type: 'text', title: 'Score IA', width: 100, readOnly: true },
+  ], [currencySymbol]);
   const [data, setData] = useState<any[][]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -44,8 +47,12 @@ export default function Reconciliation() {
   };
 
   const [viewMode, setViewMode] = useState<'pending' | 'history'>('pending');
-  const [compteBanque, setCompteBanque] = useState('512100');
+  const [compteBanque, setCompteBanque] = useState(isOHADA ? '521100' : '512100');
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCompteBanque(isOHADA ? '521100' : '512100');
+  }, [isOHADA]);
   
   const [rulesContent, setRulesContentState] = useState<string>('');
   const rulesContentRef = useRef<string>('');
@@ -66,14 +73,25 @@ export default function Reconciliation() {
       lignesReleve.forEach(l => {
         if (l.statut === 'reconcilie' && l.piece_comptable) {
           const matchingJournals = journalEntries.filter(j => j.piece === l.piece_comptable);
+          let linkedFacture = false;
           matchingJournals.forEach(j => {
             if (j.statut !== 'reconcilie') {
               updateDoc(doc(db, 'journal', j.id), { statut: 'reconcilie' }).catch(console.error);
             }
             if (j.facture_id) {
+              linkedFacture = true;
               updateDoc(doc(db, 'factures', j.facture_id), { statut: 'rapproche' }).catch(console.error);
             }
           });
+          if (!linkedFacture) {
+            getDocs(query(collection(db, 'factures'), where('numero_facture', '==', l.piece_comptable)))
+              .then(snap => {
+                snap.forEach(d => {
+                  updateDoc(doc(db, 'factures', d.id), { statut: 'rapproche' }).catch(console.error);
+                });
+              })
+              .catch(console.error);
+          }
         }
       });
     }
@@ -249,13 +267,23 @@ export default function Reconciliation() {
 
         for (const piece of piecesToUnreconcile) {
           const matchingJournals = journals.filter(j => j.piece === piece);
+          let linkedFacture = false;
           for (const j of matchingJournals) {
             // Revert the journal entry to 'cree'
             await updateDoc(doc(db, 'journal', j.id), { statut: 'cree' });
             
             // Revert facture status to 'alloue'
             if (j.facture_id) {
+              linkedFacture = true;
               await updateDoc(doc(db, 'factures', j.facture_id), { statut: 'alloue' }).catch(console.error);
+            }
+          }
+          if (!linkedFacture) {
+            const fSnap = await getDocs(query(collection(db, 'factures'), where('numero_facture', '==', piece))).catch(() => null);
+            if (fSnap) {
+              for (const fDoc of fSnap.docs) {
+                await updateDoc(doc(db, 'factures', fDoc.id), { statut: 'alloue' }).catch(console.error);
+              }
             }
           }
         }
@@ -368,6 +396,7 @@ export default function Reconciliation() {
         const piece = String(row[4] || '');
         if (piece) {
           const matchingJournals = journalEntriesRef.current.filter(j => j.piece === piece);
+          let linkedFacture = false;
           for (const matchingJournal of matchingJournals) {
             if (newStatut === 'reconcilie') {
               await updateDoc(doc(db, 'journal', matchingJournal.id), {
@@ -375,6 +404,7 @@ export default function Reconciliation() {
               });
               
               if (matchingJournal.facture_id) {
+                linkedFacture = true;
                 await updateDoc(doc(db, 'factures', matchingJournal.facture_id), {
                   statut: 'rapproche'
                 });
@@ -384,9 +414,20 @@ export default function Reconciliation() {
               await updateDoc(doc(db, 'journal', matchingJournal.id), { statut: 'cree' });
               
               if (matchingJournal.facture_id) {
+                linkedFacture = true;
                 await updateDoc(doc(db, 'factures', matchingJournal.facture_id), {
                   statut: 'alloue'
                 });
+              }
+            }
+          }
+          if (!linkedFacture) {
+            const fSnap = await getDocs(query(collection(db, 'factures'), where('numero_facture', '==', piece))).catch(() => null);
+            if (fSnap) {
+              for (const fDoc of fSnap.docs) {
+                await updateDoc(doc(db, 'factures', fDoc.id), {
+                  statut: newStatut === 'reconcilie' ? 'rapproche' : 'alloue'
+                }).catch(console.error);
               }
             }
           }
@@ -518,10 +559,42 @@ export default function Reconciliation() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `Rapprochement SYSCOHADA (${pays || 'Espace OHADA'} - Trésorerie Cl. 5)` : 'Rapprochement PCG France (Compte 512)'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Réconciliation Bancaire</h1>
-          <p className="text-neutral-500">Rapprochez vos opérations bancaires avec vos écritures comptables.</p>
+          <p className="text-neutral-500">
+            Rapprochez vos opérations bancaires avec vos écritures comptables ({isOHADA ? 'SYSCOHADA' : 'PCG'}).
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm mr-1">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
           <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl mr-2">
             <button
               onClick={() => setViewMode('pending')}
@@ -588,10 +661,10 @@ export default function Reconciliation() {
         <div className="lg:col-span-3 space-y-6">
           <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
             <div className="p-4 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/50">
-              <h3 className="text-sm font-bold">{viewMode === 'pending' ? 'Rapprochement BNP - Mois en cours' : 'Historique des Rapprochements'}</h3>
+              <h3 className="text-sm font-bold">{viewMode === 'pending' ? `Rapprochement Banque (${compteBanque})` : 'Historique des Rapprochements'}</h3>
               <div className="flex items-center gap-4">
-                <div className="text-xs font-bold text-emerald-600">Rapproché: {totalRapproche.toFixed(2)} €</div>
-                <div className="text-xs font-bold text-amber-600">En suspens: {totalAttente.toFixed(2)} €</div>
+                <div className="text-xs font-bold text-emerald-600">Rapproché: {totalRapproche.toFixed(2)} {currencySymbol}</div>
+                <div className="text-xs font-bold text-amber-600">En suspens: {totalAttente.toFixed(2)} {currencySymbol}</div>
               </div>
             </div>
             <div className="p-0 min-h-[400px]">

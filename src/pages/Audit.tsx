@@ -1,24 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { AuthProvider, useAuth } from '../AuthContext';
-import { ClipboardCheck, AlertTriangle, CheckCircle2, ShieldAlert, Search, Filter, Download, FileWarning, Eye, Loader2 } from 'lucide-react';
+import { useAccounting } from '../AccountingContext';
+import { ClipboardCheck, AlertTriangle, CheckCircle2, ShieldAlert, Search, Filter, Download, FileWarning, Eye, Loader2, Globe2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
-const initialChecklist = [
-  { id: '1', task: 'Vérification des mentions obligatoires', status: 'pending' },
-  { id: '2', task: 'Rapprochement bancaire mensuel', status: 'pending' },
-  { id: '3', task: 'Validation des nouveaux fournisseurs', status: 'pending' },
-  { id: '4', task: 'Contrôle des doublons de facturation', status: 'pending' },
-  { id: '5', task: 'Vérification des taux de TVA appliqués', status: 'pending' },
-];
-
 export default function Audit() {
   const { user } = useAuth();
+  const { standard, setStandard, currencySymbol, isOHADA, pays, formatMoney } = useAccounting();
   const [factures, setFactures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [risks, setRisks] = useState<any[]>([]);
+
+  const initialChecklist = useMemo(() => [
+    { id: '1', task: isOHADA ? 'Contrôle mentions OHADA (RCCM / NIF / Facture Normalisée)' : 'Vérification des mentions obligatoires (SIRET / CGI)', status: 'pending' },
+    { id: '2', task: isOHADA ? 'Rapprochement bancaire (comptes 521 / 571)' : 'Rapprochement bancaire mensuel (compte 512)', status: 'pending' },
+    { id: '3', task: isOHADA ? 'Validation des tiers (Classe 4 Fournisseurs 401 / Clients 411)' : 'Validation des nouveaux fournisseurs (401)', status: 'pending' },
+    { id: '4', task: 'Contrôle des doublons de facturation et montants identiques', status: 'pending' },
+    { id: '5', task: isOHADA ? 'Vérification TVA UEMOA/CEMAC (18% / 19.25% et exonérations)' : 'Vérification des taux de TVA appliqués (20%, 10%, 5.5%)', status: 'pending' },
+  ], [isOHADA]);
+
   const [checklist, setChecklist] = useState(initialChecklist);
 
   useEffect(() => {
@@ -45,7 +48,7 @@ export default function Audit() {
             id: `dup-${f.id}`,
             title: 'Doublon potentiel détecté',
             severity: 'high',
-            description: `Une autre facture de ${f.emetteur_nom} pour ${f.montant_ttc_eur}€ existe déjà.`,
+            description: `Une autre facture de ${f.emetteur_nom} pour ${f.montant_ttc_eur} ${currencySymbol} existe déjà.`,
             doc: f.numero_facture || 'INCONNU'
           });
         } else {
@@ -55,12 +58,13 @@ export default function Audit() {
 
       // 2. Check for high amounts
       facturesList.forEach(f => {
-        if (f.montant_ttc_eur > 10000) {
+        const threshold = isOHADA ? 5000000 : 10000;
+        if (f.montant_ttc_eur > threshold) {
           newRisks.push({
             id: `high-${f.id}`,
             title: 'Montant exceptionnel',
             severity: 'medium',
-            description: `La facture dépasse le seuil d'alerte de 10 000€ (${f.montant_ttc_eur}€).`,
+            description: `La facture dépasse le seuil d'alerte (${formatMoney(threshold)}).`,
             doc: f.numero_facture || 'INCONNU'
           });
         }
@@ -155,10 +159,42 @@ export default function Audit() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `Audit SYSCOHADA (${pays || 'Espace OHADA'})` : 'Audit PCG France'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Préparation à l'Audit</h1>
-          <p className="text-neutral-500">Identification des risques et checklist de conformité comptable.</p>
+          <p className="text-neutral-500">
+            Identification des risques et checklist de conformité ({isOHADA ? 'Actes Uniformes OHADA / SYSCOHADA Révisé' : 'Code de Commerce / FEC France'}).
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
           <button 
             onClick={handleExportCSV}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors shadow-sm"

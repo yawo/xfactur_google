@@ -4,7 +4,21 @@ import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
+import { OHADA_COUNTRIES } from '../services/accountingService';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { AccountingStandard, DeviseCode } from '../types';
+
+interface OrgFormData {
+  nom: string;
+  siret: string;
+  email_admin: string;
+  regime_tva: string;
+  statut: string;
+  referentiel: AccountingStandard;
+  pays: string;
+  devise: DeviseCode;
+}
 
 const settingsSections = [
   { id: 'org', icon: Globe, label: 'Organisation', description: 'Informations légales et fiscales.' },
@@ -17,13 +31,17 @@ const settingsSections = [
 
 export default function Admin() {
   const { user } = useAuth();
+  const { standard, devise, pays, savePreferences } = useAccounting();
   const [activeSection, setActiveSection] = useState('org');
-  const [orgData, setOrgData] = useState({
+  const [orgData, setOrgData] = useState<OrgFormData>({
     nom: '',
     siret: '',
     email_admin: '',
     regime_tva: 'reel',
-    statut: 'actif'
+    statut: 'actif',
+    referentiel: (standard || 'OHADA') as AccountingStandard,
+    pays: pays || 'Sénégal',
+    devise: (devise || 'XOF') as DeviseCode
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -35,7 +53,14 @@ export default function Admin() {
         const docRef = doc(db, 'organisations', user.uid);
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
-          setOrgData(docSnap.data() as any);
+          const data = docSnap.data();
+          setOrgData(prev => ({ 
+            ...prev, 
+            ...data,
+            referentiel: data.referentiel || standard,
+            pays: data.pays || pays,
+            devise: data.devise || devise
+          }));
         } else {
           setOrgData(prev => ({ ...prev, email_admin: user.email || '' }));
         }
@@ -54,6 +79,7 @@ export default function Admin() {
     try {
       const docRef = doc(db, 'organisations', user.uid);
       await setDoc(docRef, orgData, { merge: true });
+      await savePreferences(orgData.referentiel as any, orgData.devise as any, orgData.pays);
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'organisations');
     } finally {
@@ -125,15 +151,82 @@ export default function Admin() {
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20" 
                       />
                     </div>
+
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">SIRET</label>
+                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">
+                        {orgData.referentiel === 'OHADA' ? 'Identifiant Légal (RCCM / NIF / IFU / NINEA)' : 'Numéro SIRET'}
+                      </label>
                       <input 
                         type="text" 
                         value={orgData.siret}
+                        placeholder={orgData.referentiel === 'OHADA' ? 'Ex: SN.DKR.2023.B.12345 ou IFU 3201...' : '14 chiffres'}
                         onChange={e => setOrgData({...orgData, siret: e.target.value})}
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20" 
                       />
                     </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Référentiel Comptable</label>
+                      <select 
+                        value={orgData.referentiel}
+                        onChange={e => {
+                          const newStd = e.target.value as AccountingStandard;
+                          setOrgData(prev => ({
+                            ...prev,
+                            referentiel: newStd,
+                            devise: newStd === 'OHADA' ? 'XOF' : 'EUR',
+                            pays: newStd === 'OHADA' ? 'Sénégal' : 'France'
+                          }));
+                        }}
+                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 font-bold"
+                      >
+                        <option value="OHADA">SYSCOHADA Révisé (17 Pays OHADA)</option>
+                        <option value="PCG">Plan Comptable Général (France PCG 2026)</option>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Pays d'implantation</label>
+                      <select 
+                        value={orgData.pays}
+                        onChange={e => {
+                          const p = e.target.value;
+                          const found = OHADA_COUNTRIES.find(c => c.nom.toLowerCase() === p.toLowerCase());
+                          setOrgData(prev => ({
+                            ...prev,
+                            pays: p,
+                            devise: found ? found.devise : prev.devise
+                          }));
+                        }}
+                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      >
+                        <optgroup label="Espace OHADA (Afrique de l'Ouest & Centrale)">
+                          {OHADA_COUNTRIES.map(c => (
+                            <option key={c.code} value={c.nom}>{c.nom} ({c.zone}) - TVA {c.tauxTvaStandard}%</option>
+                          ))}
+                        </optgroup>
+                        <optgroup label="Europe">
+                          <option value="France">France</option>
+                        </optgroup>
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Devise principale de tenue de comptes</label>
+                      <select 
+                        value={orgData.devise}
+                        onChange={e => setOrgData({...orgData, devise: e.target.value as any})}
+                        className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                      >
+                        <option value="XOF">FCFA (XOF - Franc de la Communauté Financière d'Afrique)</option>
+                        <option value="XAF">FCFA (XAF - Franc de la Coopération Financière en Afrique Centrale)</option>
+                        <option value="EUR">Euro (€)</option>
+                        <option value="USD">Dollar US ($)</option>
+                        <option value="CDF">Franc Congolais (CDF)</option>
+                        <option value="GNF">Franc Guinéen (GNF)</option>
+                      </select>
+                    </div>
+
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Email de facturation</label>
                       <input 
@@ -143,15 +236,18 @@ export default function Admin() {
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20" 
                       />
                     </div>
+
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Régime de TVA</label>
+                      <label className="text-xs font-bold text-neutral-400 uppercase tracking-wider">Régime Fiscal & Comptable</label>
                       <select 
                         value={orgData.regime_tva}
                         onChange={e => setOrgData({...orgData, regime_tva: e.target.value})}
                         className="w-full bg-neutral-50 border border-neutral-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
                       >
-                        <option value="reel">Réel Normal / Simplifié</option>
-                        <option value="franchise">Franchise en base</option>
+                        <option value="reel">Système Normal / Réel Normal</option>
+                        <option value="synthetique">Système Minimal de Trésorerie (SMT) / Régime Synthétique</option>
+                        <option value="franchise">Franchise de TVA / Régime de base</option>
+                        <option value="exempt">Exonération spécifique (Code des Investissements)</option>
                       </select>
                     </div>
                   </div>

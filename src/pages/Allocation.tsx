@@ -1,31 +1,24 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Calculator, Search, Filter, Save, Download, Plus, Trash2, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Calculator, Search, Filter, Save, Download, Plus, Trash2, Loader2, Globe2 } from 'lucide-react';
 import Spreadsheet from '../components/Spreadsheet';
 import MarkdownEditorModal from '../components/MarkdownEditorModal';
-import { pcgService } from '../services/pcgService';
+import { accountingService } from '../services/accountingService';
 import { AccountPCG } from '../types';
 import { motion } from 'motion/react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, addDoc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { aiService } from '../services/aiService';
-
-const columns = [
-  { type: 'text', title: 'ID Facture', width: 0, readOnly: true }, // Hidden
-  { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' } },
-  { type: 'text', title: 'Compte', width: 100 },
-  { type: 'text', title: 'Libellé Compte', width: 250 },
-  { type: 'numeric', title: 'Débit (€)', width: 120, mask: '#.##0,00' },
-  { type: 'numeric', title: 'Crédit (€)', width: 120, mask: '#.##0,00' },
-  { type: 'text', title: 'Pièce', width: 120 },
-  { type: 'text', title: 'Libellé Ecriture', width: 200 },
-];
+import { cn } from '../lib/utils';
 
 export default function Allocation() {
   const { user } = useAuth();
+  const { standard, setStandard, devise, currencySymbol, isOHADA } = useAccounting();
   const [data, setData] = useState<any[][]>([]);
-  const [pcg, setPcg] = useState<AccountPCG[]>([]);
+  const [accounts, setAccounts] = useState<AccountPCG[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedClass, setSelectedClass] = useState<string>('all');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -33,6 +26,17 @@ export default function Allocation() {
   const [viewMode, setViewMode] = useState<'pending' | 'history'>('pending');
   const [rulesContent, setRulesContentState] = useState<string>('');
   const rulesContentRef = useRef<string>('');
+
+  const columns = useMemo(() => [
+    { type: 'text', title: 'ID Facture', width: 0, readOnly: true }, // Hidden
+    { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' } },
+    { type: 'text', title: 'Compte', width: 100 },
+    { type: 'text', title: 'Libellé Compte', width: 250 },
+    { type: 'numeric', title: `Débit (${currencySymbol})`, width: 120, mask: '#.##0,00' },
+    { type: 'numeric', title: `Crédit (${currencySymbol})`, width: 120, mask: '#.##0,00' },
+    { type: 'text', title: 'Pièce', width: 120 },
+    { type: 'text', title: 'Libellé Ecriture', width: 200 },
+  ], [currencySymbol]);
 
   const setRulesContent = (content: string) => {
     setRulesContentState(content);
@@ -62,14 +66,14 @@ export default function Allocation() {
       
       for (const f of toProcess) {
         try {
-          const result = await aiService.allocateAccounting(f, rulesContentRef.current);
+          const result = await aiService.allocateAccounting(f, rulesContentRef.current, standard, devise);
           
           if (result.success && result.data && result.data.entries) {
             result.data.entries.forEach((entry: any) => {
               generatedLines.push([
                 f.id,
                 entry.date_ecriture || f.date_emission || new Date().toISOString().split('T')[0],
-                entry.compte_id || '401000',
+                entry.compte_id || (isOHADA ? '401100' : '401000'),
                 entry.libelle_compte || 'Compte',
                 (entry.debit || 0).toFixed(2),
                 (entry.credit || 0).toFixed(2),
@@ -90,11 +94,19 @@ export default function Allocation() {
           const date = f.date_emission || new Date().toISOString().split('T')[0];
           const libelle = f.emetteur_nom || 'Fournisseur';
 
-          generatedLines.push([f.id, date, '606400', 'Fournitures de bureau', ht.toFixed(2), '0.00', piece, libelle]);
-          if (tva > 0) {
-            generatedLines.push([f.id, date, '445660', 'TVA sur autres biens et services', tva.toFixed(2), '0.00', piece, libelle]);
+          if (isOHADA) {
+            generatedLines.push([f.id, date, '605400', 'Fournitures de bureau (SYSCOHADA)', ht.toFixed(2), '0.00', piece, libelle]);
+            if (tva > 0) {
+              generatedLines.push([f.id, date, '445200', 'État, TVA récupérable sur achats (SYSCOHADA)', tva.toFixed(2), '0.00', piece, libelle]);
+            }
+            generatedLines.push([f.id, date, '401100', 'Fournisseurs - Achats de biens (SYSCOHADA)', '0.00', ttc.toFixed(2), piece, libelle]);
+          } else {
+            generatedLines.push([f.id, date, '606400', 'Fournitures de bureau (PCG)', ht.toFixed(2), '0.00', piece, libelle]);
+            if (tva > 0) {
+              generatedLines.push([f.id, date, '445660', 'TVA sur autres biens et services (PCG)', tva.toFixed(2), '0.00', piece, libelle]);
+            }
+            generatedLines.push([f.id, date, '401100', 'Fournisseurs - Achats de biens (PCG)', '0.00', ttc.toFixed(2), piece, libelle]);
           }
-          generatedLines.push([f.id, date, '401100', 'Fournisseurs - Achats de biens', '0.00', ttc.toFixed(2), piece, libelle]);
         }
       }
       
@@ -110,8 +122,8 @@ export default function Allocation() {
   };
 
   useEffect(() => {
-    pcgService.loadPCG().then(setPcg);
-  }, []);
+    accountingService.getAccounts(standard).then(setAccounts);
+  }, [standard]);
 
   useEffect(() => {
     if (!user) return;
@@ -198,7 +210,13 @@ export default function Allocation() {
     }
   }, [viewMode, user]);
 
-  const filteredPcg = pcgService.searchAccounts(pcg, searchQuery);
+  const filteredAccounts = useMemo(() => {
+    let result = accountingService.searchAccounts(accounts, searchQuery);
+    if (selectedClass !== 'all') {
+      result = result.filter(a => a.compte.startsWith(selectedClass));
+    }
+    return result;
+  }, [accounts, searchQuery, selectedClass]);
 
   const handleSave = async () => {
     if (!user) return;
@@ -300,35 +318,69 @@ export default function Allocation() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? 'Référentiel SYSCOHADA Révisé' : 'Référentiel PCG France 2026'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Allocation Comptable</h1>
-          <p className="text-neutral-500">Transformez vos factures en écritures comptables (PCG 2026).</p>
+          <p className="text-neutral-500">
+            Transformez vos factures en écritures comptables ({isOHADA ? 'SYSCOHADA Révisé' : 'PCG 2026'}).
+          </p>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl mr-2">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Standard Toggle */}
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl">
             <button
               onClick={() => setViewMode('pending')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'pending' ? 'bg-white text-emerald-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-700'}`}
+              className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${viewMode === 'pending' ? 'bg-white text-emerald-600 shadow-sm font-bold' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               À allouer
             </button>
             <button
               onClick={() => setViewMode('history')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${viewMode === 'history' ? 'bg-white text-emerald-600 shadow-sm' : 'text-neutral-500 hover:text-neutral-700'}`}
+              className={`px-4 py-1.5 text-xs font-medium rounded-lg transition-colors ${viewMode === 'history' ? 'bg-white text-emerald-600 shadow-sm font-bold' : 'text-neutral-500 hover:text-neutral-700'}`}
             >
               Journal complet
             </button>
           </div>
+
           <button 
             onClick={handleExportFEC}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm font-medium hover:bg-neutral-50 transition-colors shadow-sm"
+            className="flex items-center gap-2 px-3 py-2 bg-white border border-neutral-200 rounded-xl text-xs font-medium hover:bg-neutral-50 transition-colors shadow-sm"
           >
-            <Download className="w-4 h-4" />
-            Export FEC
+            <Download className="w-3.5 h-3.5" />
+            Export FEC / Grand Livre
           </button>
           <button 
             onClick={handleSave}
             disabled={saving || data.length === 0 || equilibre > 0.01}
-            className="flex items-center gap-2 px-6 py-2 bg-emerald-600 text-white rounded-xl text-sm font-bold hover:bg-emerald-700 transition-all shadow-sm disabled:opacity-50"
+            className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition-all shadow-sm disabled:opacity-50"
           >
             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
             Générer les écritures
@@ -342,10 +394,10 @@ export default function Allocation() {
             <div className="p-4 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/50">
               <h3 className="text-sm font-bold">{viewMode === 'pending' ? 'Journal des Achats - Brouillard' : 'Journal Complet'}</h3>
               <div className="flex items-center gap-4">
-                <div className="text-xs font-bold text-emerald-600">Total Débit: {totalDebit.toFixed(2)} €</div>
-                <div className="text-xs font-bold text-red-600">Total Crédit: {totalCredit.toFixed(2)} €</div>
+                <div className="text-xs font-bold text-emerald-600">Total Débit: {totalDebit.toFixed(2)} {currencySymbol}</div>
+                <div className="text-xs font-bold text-red-600">Total Crédit: {totalCredit.toFixed(2)} {currencySymbol}</div>
                 <div className={`text-xs font-bold ${equilibre > 0.01 ? 'text-amber-600' : 'text-neutral-400'}`}>
-                  Equilibre: {equilibre.toFixed(2)} €
+                  Equilibre: {equilibre.toFixed(2)} {currencySymbol}
                 </div>
               </div>
             </div>
@@ -373,9 +425,14 @@ export default function Allocation() {
           </div>
 
           <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold">Recherche PCG 2026</h3>
-              <div className="relative w-64">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-bold">
+                  Comptes {isOHADA ? 'SYSCOHADA Révisé' : 'PCG 2026'}
+                </h3>
+                <p className="text-xs text-neutral-400">Cliquez pour insérer ou consulter les comptes officiels</p>
+              </div>
+              <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
                 <input 
                   type="text" 
@@ -386,17 +443,53 @@ export default function Allocation() {
                 />
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-64 overflow-y-auto pr-2">
-              {filteredPcg.map((account) => (
+
+            {/* Class tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-3 border-b border-neutral-100 text-xs">
+              <button
+                onClick={() => setSelectedClass('all')}
+                className={cn("px-2.5 py-1 rounded-lg font-semibold transition-all", selectedClass === 'all' ? "bg-neutral-900 text-white" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200")}
+              >
+                Toutes
+              </button>
+              {['1', '2', '3', '4', '5', '6', '7', '8'].map(cls => (
+                <button
+                  key={cls}
+                  onClick={() => setSelectedClass(cls)}
+                  className={cn("px-2.5 py-1 rounded-lg font-semibold transition-all", selectedClass === cls ? "bg-amber-600 text-white font-bold" : "bg-neutral-100 text-neutral-600 hover:bg-neutral-200")}
+                >
+                  Cl. {cls}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-2">
+              {filteredAccounts.map((account) => (
                 <div 
                   key={account.compte} 
-                  className="flex items-center justify-between p-3 bg-neutral-50 rounded-xl border border-neutral-100 hover:border-emerald-200 hover:bg-emerald-50 transition-all cursor-pointer group"
+                  onClick={() => {
+                    // Quick add blank line with selected account
+                    const newLine = [
+                      'MANUEL_' + Date.now(),
+                      new Date().toISOString().split('T')[0],
+                      account.compte,
+                      account.libelle,
+                      '0.00',
+                      '0.00',
+                      'PIECE',
+                      'Ecriture manuelle'
+                    ];
+                    const next = [...(spreadsheetDataRef.current || []), newLine];
+                    setData(next);
+                    spreadsheetDataRef.current = next;
+                  }}
+                  className="flex items-center justify-between p-3 bg-neutral-50 rounded-xl border border-neutral-100 hover:border-amber-200 hover:bg-amber-50/50 transition-all cursor-pointer group"
                 >
                   <div>
-                    <span className="text-xs font-bold text-emerald-600">{account.compte}</span>
+                    <span className="text-xs font-bold text-amber-600 font-mono">{account.compte}</span>
                     <p className="text-sm font-medium truncate max-w-[200px]">{account.libelle}</p>
                   </div>
-                  <Plus className="w-4 h-4 text-neutral-300 group-hover:text-emerald-600" />
+                  <Plus className="w-4 h-4 text-neutral-300 group-hover:text-amber-600" />
                 </div>
               ))}
             </div>
@@ -407,11 +500,10 @@ export default function Allocation() {
           <div className="bg-white p-6 rounded-2xl border border-neutral-200 shadow-sm">
             <h3 className="text-sm font-bold mb-4 flex items-center gap-2">
               <Calculator className="w-4 h-4 text-emerald-600" />
-              IA Allocation
+              IA Allocation ({isOHADA ? 'SYSCOHADA' : 'PCG'})
             </h3>
             <p className="text-xs text-neutral-500 mb-6 leading-relaxed">
-              L'IA a alloué automatiquement <strong>92%</strong> des lignes. 
-              Les comptes ont été choisis en fonction de votre historique et des règles <code>allocation_org.md</code>.
+              L'IA génère les écritures selon les règles d'imputation officielles du {isOHADA ? 'SYSCOHADA (Classe 6, TVA 4452, Fournisseur 4011)' : 'PCG français (Classe 6, TVA 44566, Fournisseur 4010)'}.
             </p>
             <div className="space-y-4">
               <button 

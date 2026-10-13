@@ -1,10 +1,17 @@
+export type AccountingStandard = 'PCG' | 'OHADA';
+export type DeviseCode = 'EUR' | 'XOF' | 'XAF' | 'USD' | 'CDF' | 'GNF';
+
 export interface Organisation {
   id: string;
   nom: string;
-  siret: string;
+  siret: string; // or RCCM / NIF / IFU / NINEA
+  identifiant_legal?: string;
   email_admin: string;
-  regime_tva: 'franchise' | 'reel';
+  regime_tva: 'franchise' | 'reel' | 'synthetique' | 'exempt';
   statut: 'actif' | 'inactif';
+  referentiel?: AccountingStandard;
+  devise?: DeviseCode;
+  pays?: string;
 }
 
 export interface Entreprise {
@@ -75,6 +82,25 @@ export interface AccountPCG {
   compte: string;
   libelle: string;
   parent?: string;
+}
+
+export interface AccountOHADA {
+  compte: string;
+  libelle: string;
+  parent?: string;
+  classe?: number;
+}
+
+export type AccountingAccount = AccountPCG;
+
+export interface OHADACountryInfo {
+  code: string;
+  nom: string;
+  zone: 'UEMOA' | 'CEMAC' | 'AUTRE';
+  devise: DeviseCode;
+  tauxTvaStandard: number;
+  identifiantFiscal: string; // Ex: 'IFU', 'RCCM', 'NINEA', 'NIU'
+  description: string;
 }
 
 export interface Subreddit {

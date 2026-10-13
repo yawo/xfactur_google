@@ -76,13 +76,13 @@ export const aiService = {
     return response.data;
   },
 
-  async checkConformity(invoiceData: any, rules?: string) {
-    const response = await axios.post('/api/ai/conformity', { invoiceData, rules });
+  async checkConformity(invoiceData: any, rules?: string, standard: string = 'PCG', country?: string) {
+    const response = await axios.post('/api/ai/conformity', { invoiceData, rules, standard, country });
     return response.data;
   },
 
-  async allocateAccounting(invoiceData: any, rules?: string) {
-    const response = await axios.post('/api/ai/allocate', { invoiceData, rules });
+  async allocateAccounting(invoiceData: any, rules?: string, standard: string = 'PCG', currency: string = 'EUR') {
+    const response = await axios.post('/api/ai/allocate', { invoiceData, rules, standard, currency });
     return response.data;
   },
 

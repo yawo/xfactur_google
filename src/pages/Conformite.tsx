@@ -1,27 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { ShieldCheck, AlertCircle, CheckCircle2, Search, Filter, Download, Save, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { ShieldCheck, AlertCircle, CheckCircle2, Search, Filter, Download, Save, Loader2, Globe2 } from 'lucide-react';
 import Spreadsheet from '../components/Spreadsheet';
 import MarkdownEditorModal from '../components/MarkdownEditorModal';
 import { motion } from 'motion/react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { aiService } from '../services/aiService';
-
-const columns = [
-  { type: 'text', title: 'ID', width: 0, readOnly: true }, // Hidden ID column
-  { type: 'text', title: 'N° Facture', width: 120 },
-  { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' } },
-  { type: 'text', title: 'Fournisseur', width: 200 },
-  { type: 'numeric', title: 'HT (€)', width: 100, mask: '#.##0,00' },
-  { type: 'numeric', title: 'TVA (€)', width: 100, mask: '#.##0,00' },
-  { type: 'numeric', title: 'TTC (€)', width: 100, mask: '#.##0,00' },
-  { type: 'dropdown', title: 'Conforme', width: 100, source: ['OUI', 'NON', 'EN ATTENTE'] },
-  { type: 'text', title: 'Score IA', width: 100, readOnly: true },
-];
+import { cn } from '../lib/utils';
 
 export default function Conformite() {
   const { user } = useAuth();
+  const { standard, setStandard, devise, pays, currencySymbol, isOHADA } = useAccounting();
   const [data, setData] = useState<any[][]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -29,6 +20,18 @@ export default function Conformite() {
   const [facturesMap, setFacturesMap] = useState<Record<string, any>>({});
   const [rulesContent, setRulesContent] = useState<string>('');
   const spreadsheetDataRef = useRef<any[][]>([]);
+
+  const columns = useMemo(() => [
+    { type: 'text', title: 'ID', width: 0, readOnly: true }, // Hidden ID column
+    { type: 'text', title: 'N° Facture', width: 120 },
+    { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' } },
+    { type: 'text', title: 'Fournisseur', width: 200 },
+    { type: 'numeric', title: `HT (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'numeric', title: `TVA (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'numeric', title: `TTC (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'dropdown', title: 'Conforme', width: 100, source: ['OUI', 'NON', 'EN ATTENTE'] },
+    { type: 'text', title: 'Score IA', width: 100, readOnly: true },
+  ], [currencySymbol]);
 
   useEffect(() => {
     if (!user) return;
@@ -40,7 +43,11 @@ export default function Conformite() {
         if (docSnap.exists() && docSnap.data().conformite !== undefined) {
           setRulesContent(docSnap.data().conformite);
         } else {
-          setRulesContent(`# Règles de Conformité\n\n- Validation SIRET obligatoire pour > 150€\n- TVA 20% par défaut sur services IT\n- Bloquer si date émission > 30 jours`);
+          if (isOHADA) {
+            setRulesContent(`# Règles de Conformité SYSCOHADA (${pays || 'Espace OHADA'})\n\n- Validation RCCM ou IFU/NIF/NINEA obligatoire\n- Taux de TVA standard 18% (ou 19.25% selon pays)\n- Mention obligatoire Facture Normalisée ou e-MECeF\n- Retenue à la source (BNC / AIR) pour prestataires sans IFU`);
+          } else {
+            setRulesContent(`# Règles de Conformité PCG (France)\n\n- Validation SIRET obligatoire pour > 150€\n- TVA 20% par défaut sur services IT\n- Bloquer si date émission > 30 jours`);
+          }
         }
       } catch (err) {
         console.error("Error fetching rules:", err);
@@ -77,7 +84,7 @@ export default function Conformite() {
         const conformeStatus = isUncheckedDefault ? 'EN ATTENTE' : (f.est_conforme === true ? 'OUI' : (f.est_conforme === false ? 'NON' : 'EN ATTENTE'));
 
         return [
-          docSnap.id,
+          f.id,
           f.numero_facture || '',
           f.date_emission || '',
           f.emetteur_nom || '',
@@ -157,7 +164,7 @@ export default function Conformite() {
         if (!factureData) continue;
         
         try {
-          const response = await aiService.checkConformity(factureData, rulesContent);
+          const response = await aiService.checkConformity(factureData, rulesContent, standard, pays);
           
           if (response.success && response.data) {
             const result = response.data;
@@ -188,10 +195,43 @@ export default function Conformite() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `Conformité Fiscale SYSCOHADA (${pays || 'Espace OHADA'})` : 'Conformité Fiscale PCG (France)'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Qualité & Conformité</h1>
-          <p className="text-neutral-500">Vérifiez et validez la conformité fiscale de vos documents.</p>
+          <p className="text-neutral-500">
+            Vérifiez et validez la conformité fiscale ({isOHADA ? 'RCCM, IFU/NIF, Facture Normalisée' : 'SIRET, TVA intracommunautaire'}) de vos documents.
+          </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Standard Switcher */}
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
           <button 
             onClick={runAICheck}
             disabled={checking || data.length === 0}
@@ -229,14 +269,22 @@ export default function Conformite() {
             </div>
           </div>
 
-          <div className="bg-emerald-600 p-6 rounded-2xl text-white shadow-lg shadow-emerald-600/20">
+          <div className={cn(
+            "p-6 rounded-2xl text-white shadow-lg transition-all",
+            isOHADA ? "bg-amber-600 shadow-amber-600/20" : "bg-emerald-600 shadow-emerald-600/20"
+          )}>
             <div className="flex items-center gap-3 mb-4">
               <ShieldCheck className="w-8 h-8 opacity-80" />
-              <h3 className="text-lg font-bold">IA Conformité</h3>
+              <h3 className="text-lg font-bold">IA Conformité {isOHADA ? 'OHADA' : 'PCG'}</h3>
             </div>
-            <p className="text-sm text-emerald-50 mb-6 leading-relaxed">
-              Le moteur IA analyse les mentions obligatoires, la cohérence des montants et la validité des SIRET/TVA.
+            <p className="text-sm opacity-95 mb-4 leading-relaxed">
+              {isOHADA 
+                ? "Le moteur IA vérifie les mentions obligatoires OHADA (RCCM, NIF/IFU/NINEA, conformité TVA régionale UEMOA/CEMAC 18-19.25% et facture normalisée)."
+                : "Le moteur IA analyse les mentions obligatoires françaises (SIRET, cohérence des taux TVA 5.5/10/20% et numérotation séquentielle)."}
             </p>
+            <div className="text-xs bg-white/10 p-2.5 rounded-xl border border-white/20">
+              <span className="font-semibold">Règle active :</span> {isOHADA ? 'Actes Uniformes OHADA & CGI UEMOA/CEMAC' : 'Code Général des Impôts (France)'}
+            </div>
           </div>
         </div>
 

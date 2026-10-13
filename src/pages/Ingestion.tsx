@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Search, Trash2, Edit2 } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Search, Trash2, Edit2, Globe2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { aiService } from '../services/aiService';
 import { cn } from '../lib/utils';
@@ -7,6 +7,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, addDoc, onSnapshot, query, where, orderBy, serverTimestamp, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { InvoiceEditorModal } from '../components/InvoiceEditorModal';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 
@@ -14,11 +15,13 @@ export default function Ingestion() {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [editingInvoice, setEditingInvoice] = useState<any | null>(null);
 
   const { user } = useAuth();
+  const { standard, setStandard, isOHADA, pays, currencySymbol, formatMoney } = useAccounting();
 
   useEffect(() => {
     if (!user) {
@@ -123,11 +126,52 @@ export default function Ingestion() {
     setFiles([]);
   };
 
+  const filteredResults = useMemo(() => {
+    if (!searchTerm.trim()) return results;
+    const term = searchTerm.toLowerCase();
+    return results.filter(r => 
+      (r.emetteur_nom || '').toLowerCase().includes(term) ||
+      (r.numero_facture || '').toLowerCase().includes(term)
+    );
+  }, [results, searchTerm]);
+
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-3xl font-bold tracking-tight">Ingestion Universelle</h1>
-        <p className="text-neutral-500">Importez vos factures pour extraction intelligente.</p>
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `SYSCOHADA (${pays || 'Espace OHADA'})` : 'PCG France'}
+            </span>
+            <span className="text-xs text-neutral-400 font-mono">Devise: {currencySymbol}</span>
+          </div>
+          <h1 className="text-3xl font-bold tracking-tight">Ingestion Universelle</h1>
+          <p className="text-neutral-500">Importez vos factures pour extraction intelligente.</p>
+        </div>
+        <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm self-start md:self-auto">
+          <button
+            onClick={() => setStandard('OHADA')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+              standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+            )}
+          >
+            SYSCOHADA
+          </button>
+          <button
+            onClick={() => setStandard('PCG')}
+            className={cn(
+              "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+              standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+            )}
+          >
+            PCG
+          </button>
+        </div>
       </header>
 
       {error && (
@@ -218,7 +262,9 @@ export default function Ingestion() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-400" />
               <input 
                 type="text" 
-                placeholder="Rechercher..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Rechercher par fournisseur ou n°..." 
                 className="pl-10 pr-4 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               />
             </div>
@@ -226,7 +272,7 @@ export default function Ingestion() {
 
           <div className="space-y-4">
             <AnimatePresence>
-              {results.map((result) => (
+              {filteredResults.map((result) => (
                 <motion.div
                   key={result.id}
                   initial={{ opacity: 0, x: 20 }}
@@ -254,7 +300,7 @@ export default function Ingestion() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className="text-lg font-bold">{(result.montant_ttc_eur || 0).toFixed(2)} €</p>
+                    <p className="text-lg font-bold font-mono">{formatMoney(result.montant_ttc_eur || 0)}</p>
                     <p className="text-[10px] text-neutral-400 uppercase tracking-widest">TTC</p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -285,9 +331,11 @@ export default function Ingestion() {
               ))}
             </AnimatePresence>
 
-            {results.length === 0 && !isUploading && (
+            {filteredResults.length === 0 && !isUploading && (
               <div className="text-center py-20 bg-white rounded-2xl border border-neutral-200 border-dashed">
-                <p className="text-neutral-400 italic">Aucune extraction récente. Importez des fichiers pour commencer.</p>
+                <p className="text-neutral-400 italic">
+                  {searchTerm ? "Aucune facture ne correspond à votre recherche." : "Aucune extraction récente. Importez des fichiers pour commencer."}
+                </p>
               </div>
             )}
           </div>

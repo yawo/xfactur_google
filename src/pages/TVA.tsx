@@ -1,33 +1,36 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Calculator, AlertCircle, CheckCircle2, Search, Filter, Download, Save, Loader2, FileWarning, BrainCircuit, Banknote } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Calculator, AlertCircle, CheckCircle2, Search, Filter, Download, Save, Loader2, FileWarning, BrainCircuit, Banknote, Globe2 } from 'lucide-react';
 import Spreadsheet from '../components/Spreadsheet';
 import { motion } from 'motion/react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc } from 'firebase/firestore';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { aiService } from '../services/aiService';
-
-const columns = [
-  { type: 'text', title: 'ID', width: 0, readOnly: true }, // Hidden ID column
-  { type: 'text', title: 'N° Facture', width: 120, readOnly: true },
-  { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' }, readOnly: true },
-  { type: 'text', title: 'Fournisseur', width: 200, readOnly: true },
-  { type: 'numeric', title: 'HT (€)', width: 100, mask: '#.##0,00' },
-  { type: 'numeric', title: 'TVA (€)', width: 100, mask: '#.##0,00' },
-  { type: 'numeric', title: 'TTC (€)', width: 100, mask: '#.##0,00' },
-  { type: 'text', title: 'Taux Calculé', width: 100, readOnly: true },
-  { type: 'dropdown', title: 'Statut TVA', width: 120, source: ['OK', 'ANOMALIE', 'À VÉRIFIER'] },
-  { type: 'text', title: 'Détail Anomalie', width: 250, readOnly: true },
-];
+import { cn } from '../lib/utils';
 
 export default function TVA() {
   const { user } = useAuth();
+  const { standard, setStandard, currencySymbol, isOHADA, pays } = useAccounting();
   const [data, setData] = useState<any[][]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [checking, setChecking] = useState(false);
   const [facturesMap, setFacturesMap] = useState<Record<string, any>>({});
   const spreadsheetDataRef = useRef<any[][]>([]);
+
+  const columns = useMemo(() => [
+    { type: 'text', title: 'ID', width: 0, readOnly: true }, // Hidden ID column
+    { type: 'text', title: 'N° Facture', width: 120, readOnly: true },
+    { type: 'calendar', title: 'Date', width: 120, options: { format: 'YYYY-MM-DD' }, readOnly: true },
+    { type: 'text', title: 'Fournisseur', width: 200, readOnly: true },
+    { type: 'numeric', title: `HT (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'numeric', title: `TVA (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'numeric', title: `TTC (${currencySymbol})`, width: 100, mask: '#.##0,00' },
+    { type: 'text', title: 'Taux Calculé', width: 100, readOnly: true },
+    { type: 'dropdown', title: 'Statut TVA', width: 120, source: ['OK', 'ANOMALIE', 'À VÉRIFIER'] },
+    { type: 'text', title: 'Détail Anomalie', width: 250, readOnly: true },
+  ], [currencySymbol]);
 
   const [stats, setStats] = useState({
     totalHT: 0,
@@ -93,12 +96,15 @@ export default function TVA() {
             detail = 'TVA à 0. Vérifier si auto-entrepreneur ou intra-com.';
           } else {
             const rate = (tva / ht) * 100;
-            const validRates = [20, 10, 5.5, 2.1, 0];
-            const isExactRate = validRates.some(r => Math.abs(rate - r) < 0.5);
+            const validRates = isOHADA 
+              ? [18, 19.25, 19, 18.9, 17.5, 16, 15, 10, 0] 
+              : [20, 10, 5.5, 2.1, 0];
+            const isExactRate = validRates.some(r => Math.abs(rate - r) < 0.6);
             
-            if (ht > 0 && (rate < 0 || rate > 20.5)) {
+            const maxAllowedRate = isOHADA ? 21.0 : 20.5;
+            if (ht > 0 && (rate < 0 || rate > maxAllowedRate)) {
               statut = 'ANOMALIE';
-              detail = `Taux global incohérent (>20% ou négatif): ~${rate.toFixed(1)}%`;
+              detail = `Taux global incohérent (>${maxAllowedRate}% ou négatif): ~${rate.toFixed(1)}%`;
             } else if (ht > 0 && !isExactRate) {
               statut = 'OK';
               detail = `Taux mixte probable (~${rate.toFixed(1)}%)`;
@@ -115,7 +121,7 @@ export default function TVA() {
         const rateDisplay = ht > 0 ? `${((tva / ht) * 100).toFixed(1)}%` : '0%';
 
         return [
-          docSnap.id,
+          f.id,
           f.numero_facture || '',
           f.date_emission || '',
           f.emetteur_nom || '',
@@ -261,13 +267,45 @@ export default function TVA() {
     <div className="space-y-6">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `TVA OHADA (${pays || 'Espace OHADA'} - 18% / 19.25%)` : 'TVA France (PCG - 20% / 10% / 5.5%)'}
+            </span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
             <Calculator className="w-8 h-8 text-emerald-600" />
             Contrôle TVA
           </h1>
-          <p className="text-neutral-500">Détection d'anomalies et vérification des montants de TVA.</p>
+          <p className="text-neutral-500">
+            Détection d'anomalies fiscales et vérification des taux de TVA ({isOHADA ? 'SYSCOHADA' : 'PCG'}).
+          </p>
         </div>
         <div className="flex items-center gap-3">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
           <button 
             onClick={handleExportCSV}
             className="flex items-center gap-2 px-4 py-2 bg-white border border-neutral-200 text-neutral-700 rounded-lg hover:bg-neutral-50 transition-colors font-medium text-sm"
@@ -302,7 +340,7 @@ export default function TVA() {
           </div>
           <div>
             <p className="text-sm text-neutral-500 font-medium">TVA Déductible Totale</p>
-            <p className="text-xl font-bold">{stats.totalTVA.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</p>
+            <p className="text-xl font-bold font-mono">{stats.totalTVA.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {currencySymbol}</p>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm flex items-center gap-4">
@@ -311,7 +349,7 @@ export default function TVA() {
           </div>
           <div>
             <p className="text-sm text-neutral-500 font-medium">Base HT Totale</p>
-            <p className="text-xl font-bold">{stats.totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €</p>
+            <p className="text-xl font-bold font-mono">{stats.totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {currencySymbol}</p>
           </div>
         </div>
         <div className="bg-white p-4 rounded-xl border border-neutral-200 shadow-sm flex items-center gap-4">

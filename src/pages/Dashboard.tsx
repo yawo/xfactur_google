@@ -16,7 +16,8 @@ import {
   BrainCircuit,
   FileWarning,
   Percent,
-  Database
+  Database,
+  Globe2
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -24,6 +25,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, getDocs, updateDoc, doc } from 'firebase/firestore';
 import { Link } from 'react-router-dom';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { 
   ComposedChart,
   Line,
@@ -40,11 +42,12 @@ import { generateMockData } from '../seed';
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const { standard, setStandard, formatAmount, currencySymbol, isOHADA, pays } = useAccounting();
   const [stats, setStats] = useState([
     { label: 'Factures à traiter', value: '0', icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
     { label: 'Rapprochements en attente', value: '0', icon: Banknote, color: 'text-blue-600', bg: 'bg-blue-50' },
     { label: 'Score de Conformité IA', value: '0%', icon: BrainCircuit, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-    { label: 'Dettes Fournisseurs', value: '0 €', icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+    { label: 'Dettes Fournisseurs', value: '0', icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
   ]);
   const [evolutionData, setEvolutionData] = useState<any[]>([]);
   const [urgentTasks, setUrgentTasks] = useState<any[]>([]);
@@ -56,14 +59,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return;
 
-    // Fetch Factures
-    const qFactures = query(collection(db, 'factures'));
+    let currentFactures: any[] = [];
+    let currentReleves: any[] = [];
 
-    const unsubscribeFactures = onSnapshot(qFactures, (snapshot) => {
-      const factures = snapshot.docs
-        .map(d => ({ id: d.id, ...(d.data() as any) }))
-        ;
-      
+    const updateDashboard = () => {
       let aTraiter = 0;
       let aValider = 0;
       let anomalies = 0;
@@ -73,16 +72,14 @@ export default function Dashboard() {
       let scoredCount = 0;
       
       const now = new Date();
-      
       const monthlyTotals = new Map<string, number>();
       const newRisks: any[] = [];
       const seenDuplicates = new Map();
 
-      factures.forEach((f: any) => {
+      currentFactures.forEach((f: any) => {
         if (f.statut === 'cree') aTraiter++;
         if (f.statut === 'valide') aValider++;
         
-        // Ignore invoices that are in a default or failed AI state
         const isUncheckedDefault = (f.score_qualite === 0 || f.score_qualite === undefined) && 
                                    (f.est_conforme === false || f.est_conforme === undefined) && 
                                    (!Array.isArray(f.alertes) || f.alertes.length === 0);
@@ -98,7 +95,6 @@ export default function Dashboard() {
           }
         }
         
-        // Check for VAT anomalies
         if (f.statut_tva === 'ANOMALIE' || f.statut_tva === 'À VÉRIFIER') {
           anomaliesTva++;
         }
@@ -113,7 +109,6 @@ export default function Dashboard() {
         const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
         monthlyTotals.set(monthKey, (monthlyTotals.get(monthKey) || 0) + amountTTC);
 
-        // Audit Risks Logic
         if (amountTTC && f.emetteur_nom) {
           const key = `${f.emetteur_nom}-${amountTTC}`;
           if (seenDuplicates.has(key)) {
@@ -133,13 +128,12 @@ export default function Dashboard() {
       setAuditRisks(newRisks.slice(0, 4));
 
       const avgScore = scoredCount > 0 ? Math.round(totalScore / scoredCount) : 0;
-      setAiPerformance({ averageScore: avgScore, processedCount: scoredCount, totalCount: factures.length });
+      setAiPerformance({ averageScore: avgScore, processedCount: scoredCount, totalCount: currentFactures.length });
 
       // Generate Chart Data
       const chartData = [];
       let lastRealValue = 0;
-      
-      setHasData(factures.length > 0);
+      setHasData(currentFactures.length > 0);
       
       for (let i = 5; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
@@ -166,48 +160,55 @@ export default function Dashboard() {
       
       setEvolutionData(chartData);
 
-      // Fetch Relevés
-      const qReleves = query(collection(db, 'lignes_releve'));
-
-      const unsubscribeReleves = onSnapshot(qReleves, (releveSnap) => {
-        let pendingReconciliations = 0;
-        releveSnap.docs
-          .map(d => d.data() as any)
-          
-          .forEach(d => {
-            const st = (d as any).statut;
-            if (st === 'cree' || st === 'attente' || st === 'valide') {
-              pendingReconciliations++;
-            }
-          });
-
-        setStats([
-          { label: 'Factures à traiter', value: aTraiter.toString(), icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
-          { label: 'Rapprochements en attente', value: pendingReconciliations.toString(), icon: Banknote, color: 'text-blue-600', bg: 'bg-blue-50' },
-          { label: 'Score de Conformité IA', value: scoredCount > 0 ? `${avgScore}%` : 'N/A', icon: BrainCircuit, color: (scoredCount === 0 || avgScore >= 80) ? 'text-emerald-600' : 'text-amber-600', bg: (scoredCount === 0 || avgScore >= 80) ? 'bg-emerald-50' : 'bg-amber-50' },
-          { label: 'Dettes Fournisseurs', value: `${dettesFournisseurs.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
-        ]);
-
-        // Urgent Tasks
-        const tasks = [];
-        if (aTraiter > 0) tasks.push({ title: `${aTraiter} factures en attente d'extraction`, link: '/ingestion', icon: Upload, color: 'text-amber-600', bg: 'bg-amber-50' });
-        if (aValider > 0) tasks.push({ title: `${aValider} factures à imputer (FEC)`, link: '/allocation', icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' });
-        if (anomalies > 0) tasks.push({ title: `${anomalies} anomalies de conformité à vérifier`, link: '/conformite', icon: ShieldAlert, color: 'text-red-600', bg: 'bg-red-50' });
-        if (anomaliesTva > 0) tasks.push({ title: `${anomaliesTva} anomalies de TVA à vérifier`, link: '/tva', icon: Percent, color: 'text-amber-600', bg: 'bg-amber-50' });
-        if (pendingReconciliations > 0) tasks.push({ title: `${pendingReconciliations} lignes bancaires à rapprocher`, link: '/reconciliation', icon: Banknote, color: 'text-blue-600', bg: 'bg-blue-50' });
-        
-        setUrgentTasks(tasks.slice(0, 5));
-      }, (err) => {
-        handleFirestoreError(err, OperationType.LIST, 'lignes_releve');
+      // Releves metrics
+      let pendingReconciliations = 0;
+      currentReleves.forEach((d: any) => {
+        const st = d.statut;
+        if (st === 'cree' || st === 'attente' || st === 'valide') {
+          pendingReconciliations++;
+        }
       });
 
-      return () => unsubscribeReleves();
+      setStats([
+        { label: 'Factures à traiter', value: aTraiter.toString(), icon: Clock, color: 'text-amber-600', bg: 'bg-amber-50' },
+        { label: 'Rapprochements en attente', value: pendingReconciliations.toString(), icon: Banknote, color: 'text-blue-600', bg: 'bg-blue-50' },
+        { label: 'Score de Conformité IA', value: scoredCount > 0 ? `${avgScore}%` : 'N/A', icon: BrainCircuit, color: (scoredCount === 0 || avgScore >= 80) ? 'text-emerald-600' : 'text-amber-600', bg: (scoredCount === 0 || avgScore >= 80) ? 'bg-emerald-50' : 'bg-amber-50' },
+        { label: 'Dettes Fournisseurs', value: formatAmount(dettesFournisseurs), icon: TrendingUp, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+      ]);
 
+      const tasks = [];
+      if (aTraiter > 0) tasks.push({ title: `${aTraiter} factures en attente d'extraction`, link: '/ingestion', icon: Upload, color: 'text-amber-600', bg: 'bg-amber-50' });
+      if (aValider > 0) tasks.push({ title: `${aValider} factures à imputer (${isOHADA ? 'SYSCOHADA' : 'FEC'})`, link: '/allocation', icon: FileText, color: 'text-indigo-600', bg: 'bg-indigo-50' });
+      tasks.push({ title: `États Financiers ${isOHADA ? 'SYSCOHADA Révisé' : 'Bilan & Résultats'}`, link: '/ohada', icon: Globe2, color: 'text-amber-600', bg: 'bg-amber-50' });
+      if (anomalies > 0) tasks.push({ title: `${anomalies} anomalies de conformité à vérifier`, link: '/conformite', icon: ShieldAlert, color: 'text-red-600', bg: 'bg-red-50' });
+      if (anomaliesTva > 0) tasks.push({ title: `${anomaliesTva} anomalies de TVA à vérifier`, link: '/tva', icon: Percent, color: 'text-amber-600', bg: 'bg-amber-50' });
+      if (pendingReconciliations > 0) tasks.push({ title: `${pendingReconciliations} lignes bancaires à rapprocher`, link: '/reconciliation', icon: Banknote, color: 'text-blue-600', bg: 'bg-blue-50' });
+      
+      setUrgentTasks(tasks.slice(0, 5));
+    };
+
+    // Fetch Factures
+    const qFactures = query(collection(db, 'factures'));
+    const unsubscribeFactures = onSnapshot(qFactures, (snapshot) => {
+      currentFactures = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      updateDashboard();
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'factures');
     });
 
-    return () => unsubscribeFactures();
+    // Fetch Relevés
+    const qReleves = query(collection(db, 'lignes_releve'));
+    const unsubscribeReleves = onSnapshot(qReleves, (snapshot) => {
+      currentReleves = snapshot.docs.map(d => d.data() as any);
+      updateDashboard();
+    }, (err) => {
+      handleFirestoreError(err, OperationType.LIST, 'lignes_releve');
+    });
+
+    return () => {
+      unsubscribeFactures();
+      unsubscribeReleves();
+    };
   }, [user]);
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -219,7 +220,7 @@ export default function Dashboard() {
             <div key={index} className="flex items-center gap-2 text-sm">
               <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
               <span className="text-neutral-500">{entry.name}:</span>
-              <span className="font-bold">{Number(entry.value).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} €</span>
+              <span className="font-bold">{Number(entry.value).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })} {currencySymbol}</span>
             </div>
           ))}
         </div>
@@ -243,21 +244,62 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 pb-12">
-      <header className="flex justify-between items-start">
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? `SYSCOHADA Révisé (${pays || 'Afrique'})` : 'PCG France 2026'}
+            </span>
+            <span className="text-xs text-neutral-400 font-mono">Devise: {currencySymbol}</span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Espace Expert-Comptable</h1>
-          <p className="text-neutral-500">Supervision financière, prévisions et tâches prioritaires.</p>
+          <p className="text-neutral-500">Supervision financière, prévisions et conformité {isOHADA ? 'SYSCOHADA' : 'PCG'}.</p>
         </div>
-        {hasData === false && (
-          <button
-            onClick={handleGenerateData}
-            disabled={isGenerating}
-            className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-bold flex items-center gap-2 hover:bg-emerald-700 transition disabled:opacity-50"
+        <div className="flex items-center gap-3">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
+          <Link
+            to="/ohada"
+            className="px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold hover:bg-amber-100 transition shadow-sm flex items-center gap-1.5"
           >
-            {isGenerating ? <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> : <Database className="w-5 h-5" />}
-            {isGenerating ? 'Génération...' : 'Générer données de test'}
-          </button>
-        )}
+            <Globe2 className="w-3.5 h-3.5" />
+            Bilan OHADA
+          </Link>
+
+          {hasData === false && (
+            <button
+              onClick={handleGenerateData}
+              disabled={isGenerating}
+              className="px-5 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-2 hover:bg-emerald-700 transition disabled:opacity-50"
+            >
+              {isGenerating ? <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" /> : <Database className="w-4 h-4" />}
+              {isGenerating ? 'Génération...' : 'Données démo'}
+            </button>
+          )}
+        </div>
       </header>
 
       {/* KPIs */}

@@ -7,9 +7,10 @@ import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, u
 
 const subreddits = [
   { id: '1', nom: 'comptabilite-generale', description: 'Discussions sur le PCG et les écritures courantes.', members: '12.4k' },
-  { id: '2', nom: 'fiscalite-france', description: 'TVA, IS, CFE et autres joyeusetés fiscales.', members: '8.2k' },
-  { id: '3', nom: 'audit-risques', description: 'Préparation à l\'audit et détection de fraudes.', members: '5.1k' },
-  { id: '4', nom: 'automatisation-finance', description: 'IA, RPA et outils de dématérialisation.', members: '15.7k' },
+  { id: '2', nom: 'syscohada-ohada', description: 'Comptabilité et fiscalité OHADA : plan révisé, UEMOA, CEMAC et AUDCIF.', members: '9.8k' },
+  { id: '3', nom: 'fiscalite-france', description: 'TVA, IS, CFE et autres joyeusetés fiscales.', members: '8.2k' },
+  { id: '4', nom: 'audit-risques', description: 'Préparation à l\'audit et détection de fraudes.', members: '5.1k' },
+  { id: '5', nom: 'automatisation-finance', description: 'IA, RPA et outils de dématérialisation.', members: '15.7k' },
 ];
 
 export default function Social() {
@@ -198,7 +199,7 @@ export default function Social() {
               Tendances
             </h3>
             <div className="space-y-3">
-              {['#TVA2026', '#FacturX', '#AuditIA', '#PCG_Update'].map((tag) => (
+              {['#SYSCOHADA', '#OHADA2026', '#TVA18', '#FactureNormalisée', '#FEC_OHADA'].map((tag) => (
                 <div key={tag} className="text-xs font-medium text-emerald-600 hover:underline cursor-pointer">
                   {tag}
                 </div>

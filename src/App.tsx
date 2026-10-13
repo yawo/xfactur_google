@@ -5,6 +5,7 @@
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext';
+import { AccountingProvider } from './AccountingContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Ingestion from './pages/Ingestion';
@@ -18,6 +19,7 @@ import Analytics from './pages/Analytics';
 import Audit from './pages/Audit';
 import Admin from './pages/Admin';
 import TVA from './pages/TVA';
+import OHADAStatements from './pages/OHADAStatements';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -60,25 +62,28 @@ function Login() {
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-            <Route index element={<Dashboard />} />
-            <Route path="ingestion" element={<Ingestion />} />
-            <Route path="factures" element={<Factures />} />
-            <Route path="conformite" element={<Conformite />} />
-            <Route path="tva" element={<TVA />} />
-            <Route path="allocation" element={<Allocation />} />
-            <Route path="reconciliation" element={<Reconciliation />} />
-            <Route path="journal" element={<Journal />} />
-            <Route path="social" element={<Social />} />
-            <Route path="analytics" element={<Analytics />} />
-            <Route path="audit" element={<Audit />} />
-            <Route path="admin" element={<Admin />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <AccountingProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+              <Route index element={<Dashboard />} />
+              <Route path="ingestion" element={<Ingestion />} />
+              <Route path="factures" element={<Factures />} />
+              <Route path="conformite" element={<Conformite />} />
+              <Route path="tva" element={<TVA />} />
+              <Route path="allocation" element={<Allocation />} />
+              <Route path="reconciliation" element={<Reconciliation />} />
+              <Route path="journal" element={<Journal />} />
+              <Route path="ohada" element={<OHADAStatements />} />
+              <Route path="social" element={<Social />} />
+              <Route path="analytics" element={<Analytics />} />
+              <Route path="audit" element={<Audit />} />
+              <Route path="admin" element={<Admin />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </BrowserRouter>
+      </AccountingProvider>
     </AuthProvider>
   );
 }

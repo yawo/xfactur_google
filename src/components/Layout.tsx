@@ -15,9 +15,11 @@ import {
   X,
   Percent,
   FileText,
-  BookOpen
+  BookOpen,
+  Globe2
 } from 'lucide-react';
 import { useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { cn } from '../lib/utils';
 import ChatAssistant from './ChatAssistant';
 
@@ -30,6 +32,7 @@ const navItems = [
   { to: '/allocation', icon: Calculator, label: 'Allocation' },
   { to: '/reconciliation', icon: Banknote, label: 'Réconciliation' },
   { to: '/journal', icon: BookOpen, label: 'Journal' },
+  { to: '/ohada', icon: Globe2, label: 'SYSCOHADA' },
   { to: '/social', icon: Users, label: 'Réseau Social' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/audit', icon: ClipboardCheck, label: 'Audit' },
@@ -38,15 +41,46 @@ const navItems = [
 
 export default function Layout() {
   const { user, logout } = useAuth();
+  const { standard, toggleStandard, currencySymbol, pays } = useAccounting();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = React.useState(false);
 
   return (
     <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900">
       {/* Sidebar Desktop */}
       <aside className="hidden md:flex flex-col w-64 bg-white border-r border-neutral-200">
-        <div className="p-6">
-          <h1 className="text-2xl font-bold tracking-tighter text-emerald-600">Xfactur</h1>
-          <p className="text-xs text-neutral-500 font-mono mt-1">v1.0.0-beta</p>
+        <div className="p-6 pb-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold tracking-tighter text-emerald-600">Xfactur</h1>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-semibold">
+              v1.2.0
+            </span>
+          </div>
+          
+          {/* Quick Standard Toggle */}
+          <div className="mt-3 p-2 bg-neutral-50 rounded-2xl border border-neutral-200">
+            <div className="flex items-center justify-between text-[11px] font-bold text-neutral-400 px-1 mb-1">
+              <span>RÉFÉRENTIEL</span>
+              <span className="text-neutral-500 font-mono">{currencySymbol}</span>
+            </div>
+            <button
+              onClick={toggleStandard}
+              className={cn(
+                "w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm",
+                standard === 'OHADA'
+                  ? "bg-amber-500 text-white hover:bg-amber-600"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              )}
+              title="Cliquer pour basculer de référentiel comptable"
+            >
+              <div className="flex items-center gap-1.5">
+                <Globe2 className="w-3.5 h-3.5" />
+                <span>{standard === 'OHADA' ? 'SYSCOHADA' : 'PCG France'}</span>
+              </div>
+              <span className="text-[10px] uppercase font-mono opacity-90">
+                {standard === 'OHADA' ? (pays || 'Afrique') : 'France'}
+              </span>
+            </button>
+          </div>
         </div>
 
         <nav className="flex-1 px-4 space-y-1 overflow-y-auto">
@@ -57,12 +91,17 @@ export default function Layout() {
               className={({ isActive }) => cn(
                 "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
                 isActive 
-                  ? "bg-emerald-50 text-emerald-700" 
+                  ? (item.to === '/ohada' ? "bg-amber-50 text-amber-800 font-bold" : "bg-emerald-50 text-emerald-700")
                   : "text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
               )}
             >
               <item.icon className="w-5 h-5" />
               {item.label}
+              {item.to === '/ohada' && (
+                <span className="ml-auto text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-amber-200/60 text-amber-900">
+                  OHADA
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -100,8 +139,35 @@ export default function Layout() {
 
       {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 bg-white z-40 pt-16 flex flex-col">
-          <nav className="flex-1 p-4 space-y-2">
+        <div className="md:hidden fixed inset-0 bg-white z-40 pt-16 flex flex-col overflow-y-auto">
+          {/* Mobile Standard Toggle */}
+          <div className="p-4 border-b border-neutral-100 bg-neutral-50/70">
+            <div className="flex items-center justify-between text-xs font-bold text-neutral-400 mb-1.5 px-1">
+              <span>RÉFÉRENTIEL COMPTABLE</span>
+              <span className="font-mono text-neutral-600">{currencySymbol}</span>
+            </div>
+            <button
+              onClick={() => {
+                toggleStandard();
+              }}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-bold transition-all shadow-sm",
+                standard === 'OHADA'
+                  ? "bg-amber-500 text-white hover:bg-amber-600"
+                  : "bg-emerald-600 text-white hover:bg-emerald-700"
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Globe2 className="w-4 h-4" />
+                <span>{standard === 'OHADA' ? 'SYSCOHADA Révisé' : 'PCG France'}</span>
+              </div>
+              <span className="text-xs uppercase font-mono bg-black/15 px-2 py-0.5 rounded-md">
+                {standard === 'OHADA' ? (pays || 'Afrique') : 'France'}
+              </span>
+            </button>
+          </div>
+
+          <nav className="flex-1 p-4 space-y-1">
             {navItems.map((item) => (
               <NavLink
                 key={item.to}

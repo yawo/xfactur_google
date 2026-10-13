@@ -8,8 +8,11 @@
         "nom": { "type": "string" },
         "siret": { "type": "string" },
         "email_admin": { "type": "string", "format": "email" },
-        "regime_tva": { "type": "string", "enum": ["franchise", "reel"] },
-        "statut": { "type": "string", "enum": ["actif", "inactif"] }
+        "regime_tva": { "type": "string", "enum": ["franchise", "reel", "synthetique", "exempt"] },
+        "statut": { "type": "string", "enum": ["actif", "inactif"] },
+        "referentiel": { "type": "string", "enum": ["PCG", "OHADA"] },
+        "pays": { "type": "string" },
+        "devise": { "type": "string" }
       },
       "required": ["nom", "siret", "email_admin"]
     },

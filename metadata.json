@@ -1,6 +1,6 @@
 {
   "name": "Xfactur",
-  "description": "Solution française de traitement intelligent de facturation : extraction IA, allocation PCG, réconciliation bancaire et analytics financiers.",
+  "description": "Plateforme intelligente de facturation et comptabilité : extraction IA, allocation PCG & SYSCOHADA Révisé, états financiers OHADA, réconciliation bancaire et conformité fiscale.",
   "requestFramePermissions": [
     "camera",
     "microphone"

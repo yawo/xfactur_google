@@ -3,6 +3,7 @@ import { X, Save, Plus, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import { useAccounting } from '../AccountingContext';
 
 interface InvoiceLine {
   description: string;
@@ -32,6 +33,7 @@ interface Props {
 }
 
 export function InvoiceEditorModal({ invoice, onClose }: Props) {
+  const { currencySymbol, isOHADA } = useAccounting();
   const [formData, setFormData] = useState<Invoice>(invoice);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -52,7 +54,7 @@ export function InvoiceEditorModal({ invoice, onClose }: Props) {
   const addLine = () => {
     setFormData(prev => ({
       ...prev,
-      lignes: [...(prev.lignes || []), { description: '', prix_unitaire_eur: 0, quantite: 1, taux_tva: 20, categorie_depense: '', montant_ht: 0, montant_tva: 0, montant_ttc: 0 }]
+      lignes: [...(prev.lignes || []), { description: '', prix_unitaire_eur: 0, quantite: 1, taux_tva: isOHADA ? 18 : 20, categorie_depense: '', montant_ht: 0, montant_tva: 0, montant_ttc: 0 }]
     }));
   };
 
@@ -170,7 +172,7 @@ export function InvoiceEditorModal({ invoice, onClose }: Props) {
                   <tr>
                     <th className="px-4 py-3 font-semibold text-neutral-600">Description</th>
                     <th className="px-4 py-3 font-semibold text-neutral-600 w-32">Catégorie</th>
-                    <th className="px-4 py-3 font-semibold text-neutral-600 w-24">Prix U. (€)</th>
+                    <th className="px-4 py-3 font-semibold text-neutral-600 w-24">Prix U. ({currencySymbol})</th>
                     <th className="px-4 py-3 font-semibold text-neutral-600 w-20">Qté</th>
                     <th className="px-4 py-3 font-semibold text-neutral-600 w-20">TVA (%)</th>
                     <th className="px-4 py-3 font-semibold text-neutral-600 w-24">Montant HT</th>

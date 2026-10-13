@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, TrendingDown, DollarSign, Calendar, PieChart, BarChart3, ArrowUpRight, ArrowDownRight, Download, Loader2, FileText, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Calendar, PieChart, BarChart3, ArrowUpRight, ArrowDownRight, Download, Loader2, FileText, Activity, Globe2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
+import { Link } from 'react-router-dom';
 import { 
   AreaChart, 
   Area, 
@@ -24,6 +26,7 @@ const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 
 export default function Analytics() {
   const { user } = useAuth();
+  const { standard, setStandard, formatAmount, currencySymbol, isOHADA } = useAccounting();
   const [loading, setLoading] = useState(true);
   const [monthlyData, setMonthlyData] = useState<any[]>([]);
   const [expenseData, setExpenseData] = useState<any[]>([]);
@@ -154,14 +157,14 @@ export default function Analytics() {
   const handleExportCSV = () => {
     if (monthlyData.length === 0 && expenseData.length === 0) return;
 
-    let csvContent = "Mois,Depenses (EUR)\n";
+    let csvContent = `Mois,Depenses (${currencySymbol})\n`;
     monthlyData.forEach(row => {
       csvContent += `"${row.name}",${row.depenses}\n`;
     });
     
     csvContent += "\n";
     
-    csvContent += "Categorie,Montant (EUR)\n";
+    csvContent += `Categorie,Montant (${currencySymbol})\n`;
     expenseData.forEach(row => {
       csvContent += `"${row.name}",${row.value}\n`;
     });
@@ -181,10 +184,49 @@ export default function Analytics() {
     <div className="space-y-8">
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className={cn(
+              "px-2.5 py-0.5 rounded-full text-xs font-bold flex items-center gap-1",
+              isOHADA ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-800"
+            )}>
+              <Globe2 className="w-3 h-3" />
+              {isOHADA ? 'Référentiel SYSCOHADA' : 'Référentiel PCG France'}
+            </span>
+            <span className="text-xs text-neutral-400 font-mono">Devise: {currencySymbol}</span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">Analytique & Prévisions</h1>
           <p className="text-neutral-500">Visualisez vos performances financières et anticipez votre trésorerie.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center bg-white p-1 rounded-xl border border-neutral-200 shadow-sm mr-2">
+            <button
+              onClick={() => setStandard('OHADA')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'OHADA' ? "bg-amber-500 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              SYSCOHADA
+            </button>
+            <button
+              onClick={() => setStandard('PCG')}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                standard === 'PCG' ? "bg-emerald-600 text-white shadow-sm" : "text-neutral-600 hover:text-neutral-900"
+              )}
+            >
+              PCG
+            </button>
+          </div>
+
+          <Link
+            to="/ohada"
+            className="px-4 py-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs font-bold hover:bg-amber-100 transition shadow-sm flex items-center gap-1.5"
+          >
+            <Globe2 className="w-3.5 h-3.5" />
+            Bilan OHADA
+          </Link>
+
           <select 
             value={timeRange}
             onChange={(e) => setTimeRange(e.target.value)}
@@ -213,10 +255,10 @@ export default function Analytics() {
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
-              { label: 'Dépenses Totales', value: `${totalExpenses.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
-              { label: 'TVA Déductible', value: `${totalTVA.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
+              { label: 'Dépenses Totales', value: formatAmount(totalExpenses), icon: TrendingDown, color: 'text-red-600', bg: 'bg-red-50' },
+              { label: 'TVA Déductible', value: formatAmount(totalTVA), icon: DollarSign, color: 'text-blue-600', bg: 'bg-blue-50' },
               { label: 'Factures Traitées', value: invoiceCount.toString(), icon: FileText, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-              { label: 'Panier Moyen', value: `${averageInvoice.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`, icon: Activity, color: 'text-indigo-600', bg: 'bg-indigo-50' },
+              { label: 'Panier Moyen', value: formatAmount(averageInvoice), icon: Activity, color: 'text-indigo-600', bg: 'bg-indigo-50' },
             ].map((stat, i) => (
               <motion.div
                 key={stat.label}
@@ -256,7 +298,7 @@ export default function Analytics() {
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#a3a3a3' }} />
                       <Tooltip 
                         contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
+                        formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencySymbol}`}
                       />
                       <Area type="monotone" name="Dépenses" dataKey="depenses" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorDep)" />
                     </AreaChart>
@@ -289,7 +331,7 @@ export default function Analytics() {
                             <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                           ))}
                         </Pie>
-                        <Tooltip formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`} />
+                        <Tooltip formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencySymbol}`} />
                       </RePieChart>
                     </ResponsiveContainer>
                   ) : (
@@ -305,7 +347,7 @@ export default function Analytics() {
                         <div className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
                         <span className="text-sm font-medium text-neutral-600 truncate max-w-[120px]">{item.name}</span>
                       </div>
-                      <span className="text-sm font-bold">{item.value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €</span>
+                      <span className="text-sm font-bold font-mono">{item.value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {currencySymbol}</span>
                     </div>
                   ))}
                 </div>
@@ -323,7 +365,7 @@ export default function Analytics() {
                       <YAxis dataKey="name" type="category" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#a3a3a3' }} width={150} />
                       <Tooltip 
                         contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                        formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`}
+                        formatter={(value: number) => `${value.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencySymbol}`}
                       />
                       <Bar dataKey="value" fill="#10b981" radius={[0, 4, 4, 0]} barSize={24}>
                         {topSuppliers.map((entry, index) => (

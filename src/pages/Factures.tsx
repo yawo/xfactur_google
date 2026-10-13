@@ -4,10 +4,12 @@ import { motion } from 'motion/react';
 import { db, auth, handleFirestoreError, OperationType } from '../firebase';
 import { collection, query, where, onSnapshot, doc, updateDoc, deleteDoc, orderBy, deleteField, getDocs } from 'firebase/firestore';
 import { AuthProvider, useAuth } from '../AuthContext';
+import { useAccounting } from '../AccountingContext';
 import { InvoiceEditorModal } from '../components/InvoiceEditorModal';
 
 export default function Factures() {
   const { user } = useAuth();
+  const { currencySymbol, formatMoney } = useAccounting();
   const [factures, setFactures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -17,76 +19,13 @@ export default function Factures() {
   useEffect(() => {
     if (!user) return;
 
-    // Temporary cleanup for orphaned factures
-    const cleanupOrphaned = async () => {
-      try {
-        const facturesSnap = await getDocs(query(collection(db, 'factures')));
-        if (facturesSnap.empty) return;
-        const myFactures = facturesSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-        
-        const journalSnap = await getDocs(query(collection(db, 'journal')));
-        const journals = journalSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-        
-        const releveSnap = await getDocs(query(collection(db, 'lignes_releve'), where('statut', '==', 'reconcilie')));
-        const releves = releveSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-
-        for (const f of myFactures) {
-          
-          if (f.statut !== 'rapproche' && f.statut !== 'alloue') continue;
-
-          // Find journal entries for this facture
-          const fJournals = journals.filter(j => j.facture_id === f.id || (f.numero_facture && j.piece === f.numero_facture));
-          
-          if (f.statut === 'alloue' && fJournals.length === 0) {
-            console.log(`Fixing orphaned alloue facture ${f.id} back to valide`);
-            await updateDoc(doc(db, 'factures', f.id), { statut: 'valide' }).catch(console.error);
-            continue;
-          }
-
-          if (f.statut === 'rapproche') {
-            let hasReconciledBankLine = false;
-            
-            // Check if any journal entry is linked to a reconciled bank line
-            for (const j of fJournals) {
-              if (releves.some(r => r.piece_comptable === j.piece)) {
-                hasReconciledBankLine = true;
-                break;
-              }
-            }
-            
-            // Also check if facture numero matches directly
-            if (!hasReconciledBankLine && f.numero_facture) {
-              if (releves.some(r => r.piece_comptable === f.numero_facture)) {
-                hasReconciledBankLine = true;
-              }
-            }
-            
-            if (!hasReconciledBankLine) {
-              console.log(`Fixing orphaned rapproche facture ${f.id} back to alloue`);
-              await updateDoc(doc(db, 'factures', f.id), { statut: 'alloue' }).catch(console.error);
-              
-              // Revert journal entries to 'cree'
-              for (const j of fJournals) {
-                await updateDoc(doc(db, 'journal', j.id), { statut: 'cree' }).catch(console.error);
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error("Error cleaning up orphaned factures:", e);
-      }
-    };
-    
-    cleanupOrphaned();
-
     const q = query(collection(db, 'factures'));
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() as any }))
-        ;
+        .map(doc => ({ id: doc.id, ...doc.data() as any }));
       
-      // Sort by date descending locally since we can't easily compound index without user action
+      // Sort by date descending locally
       data.sort((a: any, b: any) => {
         const dateA = a.date_emission || '';
         const dateB = b.date_emission || '';
@@ -156,12 +95,7 @@ export default function Factures() {
   };
 
   return (
-    <div className="space-y-6 relative">
-      {factures.length === 0 && (
-        <div className="absolute bottom-0 right-0 bg-black text-white p-2 text-xs z-50 rounded">
-          Debug: UID={user?.uid.substring(0,8)}... | loading={loading ? 'true' : 'false'}
-        </div>
-      )}
+    <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight text-neutral-900">Toutes les factures</h1>
@@ -230,10 +164,10 @@ export default function Factures() {
                       {facture.emetteur_nom || 'N/A'}
                     </td>
                     <td className="px-6 py-4 text-neutral-900 text-right font-mono">
-                      {facture.montant_ht_eur ? facture.montant_ht_eur.toFixed(2) + ' €' : '-'}
+                      {facture.montant_ht_eur !== undefined && facture.montant_ht_eur !== null ? formatMoney(facture.montant_ht_eur) : '-'}
                     </td>
                     <td className="px-6 py-4 text-neutral-900 text-right font-mono font-medium">
-                      {facture.montant_ttc_eur ? facture.montant_ttc_eur.toFixed(2) + ' €' : '-'}
+                      {facture.montant_ttc_eur !== undefined && facture.montant_ttc_eur !== null ? formatMoney(facture.montant_ttc_eur) : '-'}
                     </td>
                     <td className="px-6 py-4">
                       {getStatusBadge(facture.statut)}

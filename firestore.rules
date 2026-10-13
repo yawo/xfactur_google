@@ -113,10 +113,13 @@ service cloud.firestore {
 
     function isValidOrganisation(data) {
       return data.nom is string && data.nom.size() <= 100 &&
-             data.siret is string && (data.siret.size() == 0 || data.siret.size() == 14) &&
+             data.siret is string && data.siret.size() <= 50 &&
              (data.email_admin == "" || isValidEmail(data.email_admin)) &&
-             data.regime_tva in ['franchise', 'reel'] &&
-             data.statut in ['actif', 'inactif'];
+             data.regime_tva in ['franchise', 'reel', 'synthetique', 'exempt'] &&
+             data.statut in ['actif', 'inactif'] &&
+             (!('referentiel' in data) || data.referentiel in ['PCG', 'OHADA']) &&
+             (!('devise' in data) || data.devise is string) &&
+             (!('pays' in data) || data.pays is string);
     }
 
     function isValidFacture(data) {
@@ -159,7 +162,7 @@ service cloud.firestore {
 
     match /lignes_releve/{ligneId} {
       allow read: if isAuthenticated();
-      allow create, update: if isAuthenticated() && request.resource.data.organisation_id is string;
+      allow create, update: if isAuthenticated() && (!('organisation_id' in request.resource.data) || request.resource.data.organisation_id is string);
       allow delete: if isAuthenticated();
     }
 

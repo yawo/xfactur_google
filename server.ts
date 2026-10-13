@@ -184,9 +184,26 @@ app.post("/api/ai/extract", upload.array('files'), async (req, res) => {
 // 2. Conformity Check
 app.post("/api/ai/conformity", async (req, res) => {
   try {
-    const { invoiceData, rules } = req.body;
+    const { invoiceData, rules, standard = 'PCG', country = 'France' } = req.body;
+    const isOHADA = standard === 'OHADA';
     
-    const prompt = `
+    const prompt = isOHADA ? `
+      Analyze this invoice data for OHADA (SYSCOHADA) legal compliance and anomalies for country "${country || 'Pays membre OHADA'}".
+      Legal Requirements in OHADA:
+      - Valid RCCM (Registre du Commerce et du Crédit Mobilier) or NIF / IFU / NINEA / CC according to the member country.
+      - Obligatory invoice mentions: invoice number, issue date, full supplier identification (name, tax ID, legal form), customer name, clear breakdown of amounts (HT, TVA rate, TVA amount, TTC).
+      - VAT compliance: standard rate in OHADA countries is usually 18% (UEMOA: Côte d'Ivoire, Sénégal, Bénin, etc.) or 19.25% (Cameroun) or 16% (RDC), or exempt.
+      - Check for "Facture Normalisée" or certified fiscal tracking if applicable.
+      
+      Invoice: ${JSON.stringify(invoiceData)}
+      Organizational Rules: ${rules || "None"}
+      
+      Return a JSON object with:
+      - est_conforme: boolean
+      - score_qualite: number (0-100)
+      - alertes: array of strings (if any issues found like missing RCCM/NIF, incoherence in totals or VAT rates, etc.)
+      Return ONLY valid JSON.
+    ` : `
       Analyze this invoice data for French legal compliance and anomalies.
       Invoice: ${JSON.stringify(invoiceData)}
       Organizational Rules: ${rules || "None"}
@@ -223,12 +240,72 @@ app.post("/api/ai/conformity", async (req, res) => {
   }
 });
 
-// 3. Accounting Allocation (PCG)
+// 3. Accounting Allocation (PCG & SYSCOHADA OHADA)
 app.post("/api/ai/allocate", async (req, res) => {
   try {
-    const { invoiceData, rules } = req.body;
+    const { invoiceData, rules, standard = 'PCG', currency = 'EUR' } = req.body;
+    const isOHADA = standard === 'OHADA';
     
-    const prompt = `
+    const prompt = isOHADA ? `
+Tu es un expert-comptable diplômé de l'espace OHADA (ONECCA) spécialisé en imputation comptable selon le Système Comptable OHADA Révisé (SYSCOHADA).
+Tu dois proposer les écritures de journal pour une facture d'achat sous le référentiel SYSCOHADA Révisé.
+
+Règles fondamentales SYSCOHADA :
+- Devise d'écriture : ${currency} (FCFA, EUR ou USD).
+- L'équilibre débit/crédit DOIT être strictement respecté : SUM(débit) == SUM(crédit).
+- Utilise exclusivement les comptes officiels du SYSCOHADA Révisé.
+- Comptes fournisseurs : 4011xx (Fournisseurs - Achats de biens), 4012xx (Fournisseurs - Prestations de services), 4013xx (Sous-traitance) ou 481xxx (Fournisseurs d'investissements pour immobilisations).
+- Comptes de TVA :
+  * 445200 : État, TVA récupérable sur achats et services
+  * 445300 : État, TVA récupérable sur immobilisations
+  * 445100 : État, TVA facturée sur ventes
+- Comptes de charges d'exploitation (Classe 6) selon la nomenclature SYSCOHADA Révisé :
+  * Eau, électricité, énergie : 605100 (Fournitures non stockables - Eau et électricité)
+  * Carburants et lubrifiants : 605200 (Carburants)
+  * Fournitures d'entretien : 605300
+  * Fournitures de bureau non stockées : 605400
+  * Petit outillage et matériel de faible valeur : 605500
+  * Transports sur achats / plis / coursiers : 611000 / 614000
+  * Locations immobilières / bureaux : 622200 (Locations immobilières)
+  * Entretien et réparations : 624100 / 624200
+  * Primes d'assurance : 625100
+  * Publicité et relations publiques : 627100
+  * Frais de télécommunications (Téléphone, Internet) : 628100 / 628200
+  * Frais bancaires et tenue de compte : 631100
+  * Honoraires experts, commissaires aux comptes, juristes : 632200 / 632400
+  * Logiciels SaaS, abonnements et redevances informatiques : 634300
+  * Frais de formation : 633100
+  * Frais de réceptions et repas d'affaires : 637100
+  * Voyages et déplacements professionnels : 638100 (Transports) / 638200 (Hôtel) / 638300 (Per diem)
+  * Impôts et taxes directs (patente, vignettes) : 641100
+  * Pertes de change commerciales : 654000 (Pertes de change)
+- Évite les comptes stockés 601xxx / 602xxx sauf achat de marchandises pour revente ou matières premières.
+
+Pour chaque ligne de la facture, propose :
+1. Une écriture au débit du compte de charge SYSCOHADA approprié (montant HT).
+2. Une écriture au débit du compte TVA déductible SYSCOHADA 445200 (montant TVA).
+3. Une écriture au crédit du compte fournisseur SYSCOHADA 401100 ou 401200 (montant TTC).
+
+Données de la facture :
+${JSON.stringify(invoiceData)}
+
+Règles d'organisation spécifiques :
+${rules || "Aucune règle spécifique fournie."}
+
+Retourne UNIQUEMENT un objet JSON valide avec :
+{
+  "entries": [
+    {
+      "compte_id": "string (ex: 605400)",
+      "libelle_compte": "string (ex: Fournitures de bureau non stockées)",
+      "debit": number,
+      "credit": number,
+      "piece": "string",
+      "libelle": "string"
+    }
+  ]
+}
+` : `
 Tu es un expert-comptable français spécialisé en imputation comptable selon le Plan Comptable Général (PCG).
 Tu dois proposer les écritures de journal pour une facture d'achat.
 
@@ -291,13 +368,29 @@ Retourne UNIQUEMENT un objet JSON valide représentant les écritures de journal
         result = await callGeminiFallback(prompt);
       } catch (geminiError) {
         console.error("Gemini Allocation fallback failed:", geminiError);
-        result = JSON.stringify({ 
-          entries: [
-            { compte_id: "626000", libelle_compte: "Achats", debit: invoiceData.montant_ht_eur || 0, credit: 0, piece: invoiceData.numero_facture || "", libelle: invoiceData.emetteur_nom || "" },
-            { compte_id: "445660", libelle_compte: "TVA", debit: (invoiceData.montant_ttc_eur || 0) - (invoiceData.montant_ht_eur || 0), credit: 0, piece: invoiceData.numero_facture || "", libelle: invoiceData.emetteur_nom || "" },
-            { compte_id: "401000", libelle_compte: "Fournisseur", debit: 0, credit: invoiceData.montant_ttc_eur || 0, piece: invoiceData.numero_facture || "", libelle: invoiceData.emetteur_nom || "" }
-          ]
-        });
+        const ht = invoiceData.montant_ht_eur || 0;
+        const ttc = invoiceData.montant_ttc_eur || 0;
+        const tva = ttc - ht;
+        const piece = invoiceData.numero_facture || "";
+        const libelle = invoiceData.emetteur_nom || "";
+
+        if (isOHADA) {
+          result = JSON.stringify({ 
+            entries: [
+              { compte_id: "605400", libelle_compte: "Fournitures de bureau (SYSCOHADA)", debit: ht, credit: 0, piece, libelle },
+              { compte_id: "445200", libelle_compte: "État, TVA récupérable sur achats (SYSCOHADA)", debit: tva, credit: 0, piece, libelle },
+              { compte_id: "401100", libelle_compte: "Fournisseurs - Achats de biens (SYSCOHADA)", debit: 0, credit: ttc, piece, libelle }
+            ]
+          });
+        } else {
+          result = JSON.stringify({ 
+            entries: [
+              { compte_id: "626000", libelle_compte: "Achats", debit: ht, credit: 0, piece, libelle },
+              { compte_id: "445660", libelle_compte: "TVA", debit: tva, credit: 0, piece, libelle },
+              { compte_id: "401000", libelle_compte: "Fournisseur", debit: 0, credit: ttc, piece, libelle }
+            ]
+          });
+        }
       }
     }
 
@@ -431,20 +524,21 @@ app.post("/api/ai/chat", async (req, res) => {
     const { message, context } = req.body;
     
     const prompt = `
-      You are an AI accounting assistant for a French company.
-      The user is asking a question about their invoices and financial data.
+      You are an expert AI accounting and financial assistant proficient in both the French Plan Comptable Général (PCG) and the Système Comptable OHADA (SYSCOHADA Révisé).
+      The user is asking a question about their invoices, accounting allocations, journal entries, tax compliance, or OHADA / PCG standards.
       
       Here is a summary of their recent invoices (context):
       ${JSON.stringify(context)}
       
       User's question: "${message}"
       
-      Answer the user's question clearly and concisely in French.
-      If the answer cannot be found in the context, say so politely.
-      Do not invent data. Use a professional, helpful tone.
+      Answer the user's question clearly, concisely, and professionally in French.
+      You can explain OHADA accounts (Classes 1 to 8, 4011/4012, 4452 TVA récupérable, 6054 fournitures, etc.) or PCG accounts as requested.
+      If referring to currency, use the appropriate context (FCFA for OHADA or € for PCG).
+      If the answer cannot be found in the context, give helpful accounting guidance politely.
       
       Return ONLY a JSON object with a single field "reply" containing your answer as a string.
-      Example: {"reply": "Vous avez 3 factures en attente de validation pour un total de 1500€."}
+      Example: {"reply": "En SYSCOHADA Révisé, l'achat de fournitures de bureau s'impute au débit du compte 605400 avec la TVA récupérable au compte 445200 et le fournisseur au crédit du 401100."}
     `;
 
     let result = "";
