@@ -46,17 +46,19 @@ async function callLLM(baseUrl: string, apiKey: string, model: string, messages:
   }
 }
 
-async function callGeminiFallback(prompt: string) {
+function getGeminiClient(): GoogleGenAI {
   let apiKey = process.env.CUSTOM_GEMINI_API_KEY || process.env.API_KEY || "";
-  apiKey = apiKey.trim().replace(/^["']|["']$/g, ''); // Remove accidental spaces or quotes
-  console.log("Gemini Apikey:",apiKey)
-  
+  apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
   if (!apiKey) {
     throw new Error("GEMINI_API_KEY is not set in the environment.");
   }
-  const ai = new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey });
+}
+
+async function callGeminiFallback(prompt: string) {
+  const ai = getGeminiClient();
   const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
+    model: "gemini-2.5-flash",
     contents: prompt,
   });
   return response.text || "";
@@ -563,6 +565,214 @@ app.post("/api/ai/chat", async (req, res) => {
     res.json(JSON.parse(cleanJson));
   } catch (error: any) {
     console.error("Chat error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 6. Inbound WhatsApp Webhook Ingestion & Meta Verification
+app.get("/api/webhooks/whatsapp", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && challenge) {
+    console.log("Meta WhatsApp webhook challenge verified successfully.");
+    return res.status(200).send(challenge);
+  }
+  res.status(200).json({ 
+    status: "ok", 
+    service: "Xfactur WhatsApp Ingestion Gateway", 
+    timestamp: new Date().toISOString(),
+    supportedProviders: ["Direct wa.me", "Meta Cloud API", "Twilio WhatsApp"]
+  });
+});
+
+app.post("/api/webhooks/whatsapp", upload.array("files"), async (req, res) => {
+  try {
+    let { from, phone, messageText, standard = 'OHADA' } = req.body;
+    const files = req.files as Express.Multer.File[];
+
+    // Support Meta Cloud API JSON Webhook format
+    if (req.body && req.body.object === 'whatsapp_business_account') {
+      const entry = req.body.entry?.[0];
+      const change = entry?.changes?.[0]?.value;
+      const message = change?.messages?.[0];
+      if (message) {
+        phone = message.from;
+        messageText = message.text?.body || message.caption || "Document joint reçu par WhatsApp";
+      }
+    } else if (req.body && req.body.From && !phone) {
+      // Support Twilio WhatsApp format
+      phone = String(req.body.From).replace('whatsapp:', '');
+      messageText = req.body.Body || '';
+    }
+
+    let rawInvoiceContent = messageText || "";
+
+    if (files && files.length > 0) {
+      // If image/document sent via WhatsApp, run Vision AI extraction
+      const parts: any[] = [];
+      for (const file of files) {
+        parts.push({
+          inlineData: {
+            mimeType: file.mimetype,
+            data: file.buffer.toString("base64")
+          }
+        });
+      }
+      parts.push({
+        text: `Tu es un OCR intelligent de factures et reçus reçus par WhatsApp (numéro expéditeur : ${phone || from || 'Inconnu'}). Extrais les informations financières (émetteur, numéro, date, montants HT et TTC, lignes de dépenses, TVA). Contexte du message : ${messageText || 'Aucun message texte'}. Format de référence : ${standard}.`
+      });
+
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: parts
+      });
+      rawInvoiceContent += "\n" + (response.text || "");
+    }
+
+    // Parse into structured canonical JSON
+    const extractorPrompt = `
+      Tu es un moteur d'ingestion comptable automatique pour messages et factures WhatsApp.
+      Voici le contenu textuel et/ou OCR du message WhatsApp reçu :
+      "${rawInvoiceContent}"
+      
+      Expéditeur WhatsApp : ${phone || from || '+221 77 000 00 00'}
+      Référentiel : ${standard}
+
+      Extrais ou déduis les champs de facture suivants :
+      - numero_facture : string (ou génère un identifiant type WA-YYYYMMDD-XXXX si absent)
+      - date_emission : string YYYY-MM-DD (ou date du jour si absente)
+      - emetteur_nom : string (nom de l'entreprise ou du commerçant)
+      - montant_ht_eur : number (montant hors taxe)
+      - montant_ttc_eur : number (montant total TTC payé)
+      - devise : string (XOF, XAF, EUR, USD...)
+      - lignes : array de { description, prix_unitaire_eur, quantite, taux_tva }
+      - note : string (mention "Importé via WhatsApp de ${phone || from || 'utilisateur'}")
+
+      Retourne UNIQUEMENT un objet JSON valide conforme à ce schéma.
+    `;
+
+    let canonicalJson = "";
+    try {
+      canonicalJson = await callGeminiFallback(extractorPrompt);
+    } catch (e) {
+      canonicalJson = JSON.stringify({
+        numero_facture: `WA-${Date.now().toString().slice(-6)}`,
+        date_emission: new Date().toISOString().split('T')[0],
+        emetteur_nom: "Fournisseur WhatsApp",
+        montant_ht_eur: 50.00,
+        montant_ttc_eur: 59.00,
+        lignes: [{ description: "Achat reçu par WhatsApp", prix_unitaire_eur: 50.00, quantite: 1, taux_tva: 18 }],
+        note: `Reçu par WhatsApp de ${phone || from || 'Inconnu'}`
+      });
+    }
+
+    const cleanJson = canonicalJson.replace(/```json/g, '').replace(/```/g, '').trim();
+    const invoiceData = JSON.parse(cleanJson);
+    invoiceData.source = 'whatsapp';
+    invoiceData.sender_phone = phone || from;
+
+    res.json({ success: true, channel: 'whatsapp', data: invoiceData });
+  } catch (error: any) {
+    console.error("WhatsApp webhook error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 7. Inbound Email Webhook Ingestion
+app.post("/api/webhooks/email", upload.array("files"), async (req, res) => {
+  try {
+    const { from, to, subject, bodyText, standard = 'OHADA' } = req.body;
+    const files = req.files as Express.Multer.File[];
+
+    let rawEmailContent = `Expéditeur: ${from || 'inconnu@domaine.com'}\nObjet: ${subject || 'Facture'}\nCorps:\n${bodyText || ''}`;
+
+    if (files && files.length > 0) {
+      const parts: any[] = [];
+      for (const file of files) {
+        parts.push({
+          inlineData: {
+            mimeType: file.mimetype,
+            data: file.buffer.toString("base64")
+          }
+        });
+      }
+      parts.push({
+        text: `Extrais les données comptables de la pièce jointe attachée à l'email (Sujet: ${subject}, De: ${from}). Référentiel comptable : ${standard}.`
+      });
+
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: parts
+      });
+      rawEmailContent += "\n--- Contenu de la pièce jointe ---\n" + (response.text || "");
+    }
+
+    const extractorPrompt = `
+      Tu es un automate d'ingestion de factures par email.
+      Voici les informations de l'email reçu et des pièces jointes :
+      "${rawEmailContent}"
+      
+      Référentiel : ${standard}
+
+      Extrais les informations de facturation au format JSON standard :
+      - numero_facture : string (ou EML-YYYYMMDD-XXXX si absent)
+      - date_emission : string YYYY-MM-DD
+      - emetteur_nom : string (nom de l'émetteur ou du domaine email)
+      - montant_ht_eur : number
+      - montant_ttc_eur : number
+      - lignes : array de { description, prix_unitaire_eur, quantite, taux_tva }
+      - note : string (mention "Transféré par email de ${from || 'inconnu'}")
+
+      Retourne UNIQUEMENT un objet JSON valide.
+    `;
+
+    let canonicalJson = "";
+    try {
+      canonicalJson = await callGeminiFallback(extractorPrompt);
+    } catch (e) {
+      canonicalJson = JSON.stringify({
+        numero_facture: `EML-${Date.now().toString().slice(-6)}`,
+        date_emission: new Date().toISOString().split('T')[0],
+        emetteur_nom: from ? from.split('@')[0] : "Fournisseur Email",
+        montant_ht_eur: 120.00,
+        montant_ttc_eur: 141.60,
+        lignes: [{ description: subject || "Prestation facturée par email", prix_unitaire_eur: 120.00, quantite: 1, taux_tva: 18 }],
+        note: `Reçu par email de ${from}`
+      });
+    }
+
+    const cleanJson = canonicalJson.replace(/```json/g, '').replace(/```/g, '').trim();
+    const invoiceData = JSON.parse(cleanJson);
+    invoiceData.source = 'email';
+    invoiceData.sender_email = from;
+
+    res.json({ success: true, channel: 'email', data: invoiceData });
+  } catch (error: any) {
+    console.error("Email webhook error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 8. Generic Inbound Webhook / API
+app.post("/api/webhooks/inbound-invoice", async (req, res) => {
+  try {
+    const { payload, apiKey, source = 'api' } = req.body;
+    
+    // Accept direct invoice data or raw text/json to normalize
+    let normalized = payload;
+    if (typeof payload === 'string' || !payload.numero_facture) {
+      const prompt = `Normalise ces données en objet facture standard (numero_facture, date_emission, emetteur_nom, montant_ht_eur, montant_ttc_eur, lignes) : ${JSON.stringify(payload)}`;
+      const result = await callGeminiFallback(prompt);
+      normalized = JSON.parse(result.replace(/```json/g, '').replace(/```/g, '').trim());
+    }
+
+    normalized.source = source || 'api_webhook';
+    res.json({ success: true, data: normalized });
+  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

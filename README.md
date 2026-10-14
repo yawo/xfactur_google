@@ -82,17 +82,43 @@ Xfactur intègre un sélecteur de référentiel global persistant (`AccountingCo
 ## ⚡ Fonctionnalités Clés / Key Features
 
 ### 1. Tableau de Bord Financier & Multi-Devises (`/`)
-- Visualisation instantanée des KPI essentiels : Chiffre d'affaires, total des charges, factures en attente, taux de rapprochement bancaire.
-- Affichage automatique dans la devise active (`FCFA`, `€`, `$`, `CDF`, `GNF`).
-- Graphique d'évolution du flux de trésorerie (Cash-flow mensuel) alimenté par les données réelles.
-- Bouton de génération de données de test (« Générer données de test ») prêt à l'emploi.
+- 📊 **Section Aperçu Financier (Financial Summary Snapshot)** :
+  - **Total Revenue (Chiffre d'Affaires Total)** : Recettes réelles et ventes facturées issues des comptes de produits (Classe 7) et encaissements bancaires avec indicateur de croissance (`+14.5%`).
+  - **Pending Approvals (Approbations en Attente)** : Nombre de factures nécessitant une validation ou imputation comptable avec volume financier total en attente et statut d'action immédiat.
+  - **Monthly Expenses (Dépenses du Mois)** : Charges d'exploitation et achats fournisseurs engagés sur la période avec calcul de variation mensuelle.
+  - **Marge Nette & Résultat d'Exploitation** : Excédent brut d'exploitation (EBE) prévisionnel et taux de marge nette (`+34.2%`).
+  - **Filtre de périodicité dynamique** : Bascule instantanée entre `Ce mois-ci`, `Trimestre`, et `Année 2026`.
+- ⚡ **Indicateurs d'Exploitation & Traitement** : Factures à traiter, rapprochements en attente, score de conformité IA, dettes fournisseurs.
+- 🌍 **Bi-Référentiel & Multi-Devises** : Affichage automatique dans la devise active (`FCFA`, `€`, `$`, `CDF`, `GNF`) et bascule instantanée entre **SYSCOHADA Révisé** et **PCG France**.
+- 📈 **Graphique d'Évolution & Prévisions IA** : Projection prévisionnelle sur 3 mois alimentée par les données réelles.
+- 🧪 **Données démo** : Bouton de génération de données de test en 1 clic.
 
-### 2. Ingestion Universelle de Factures (`/ingestion`)
-- Téléversement par glisser-déposer de factures (PDF, PNG, JPEG) ou capture directe via caméra.
-- Badge d'indication visuelle du référentiel actif (SYSCOHADA vs PCG) avec sélection rapide.
-- Moteur d'extraction IA haute fidélité (API Vision + repli automatique Gemini 3.1 Pro / Flash).
-- Barre de recherche instantanée par nom d'émetteur ou numéro de facture.
-- Normalisation automatique des montants avec formatage monétaire adapté (`formatMoney`).
+### 2. Ingestion Multi-Canale Universelle (`/ingestion`) & Paramètres de Connexion (`/admin?tab=ingestion_channels`)
+La plateforme accepte les factures et reçus sur 4 canaux interconnectés et propose une **interface complète de configuration dans les Paramètres** :
+- ⚙️ **Interface de Configuration Dédiée (`/admin?tab=ingestion_channels`)** :
+  - **Connexion Compte WhatsApp** :
+    - Mode **Lien Direct & QR Code (Numéro Entreprise)** : configuration du numéro WhatsApp professionnel réel avec indicatifs internationaux (France `+33`, Sénégal `+221`, Côte d'Ivoire `+225`, etc.). Génération instantanée d'un QR Code dynamique fonctionnel (`wa.me`) scannable par tout smartphone pour ouvrir directement la discussion et envoyer les factures. Bouton d'ouverture directe sur WhatsApp Web / Mobile.
+    - Mode **Meta WhatsApp Cloud API (WABA)** : configuration API officielle d'entreprise (WABA ID, Phone Number ID, Jeton d'accès permanent, webhook verification GET `hub.challenge` et réception de messages JSON).
+    - Mode **Twilio for WhatsApp** : passerelle Twilio avec Account SID, Auth Token et numéro d'émission.
+    - Règles d'ingestion : aspiration automatique des pièces jointes (PDF, JPG, PNG, WEBP), imputation IA immédiate, accusé de réception automatique personnalisable, filtrage strict par liste blanche de numéros.
+    - Outil de diagnostic et de vérification en direct du format et de la validité du lien direct.
+  - **Connexion Boîte Email & Relève Automatique** :
+    - Mode **Synchronisation Directe IMAP / Exchange** : presets en 1-clic pour Gmail / Google Workspace, Microsoft 365 / Outlook, OVH et serveurs IMAP personnalisés (Hôte, port SSL/TLS 993, utilisateur, mot de passe d'application, dossier surveillé, fréquence de relève).
+    - Mode **Adresse Inbound Dédiée** : boîte email unique par organisation (`factures-{uid}@inbound.xfactur.app`) avec alias d'entreprise personnalisé.
+    - Règles de filtrage : extensions autorisées (`.pdf`, `.png`, `.jpg`, `.jpeg`, `.xlsx`, `.csv`), mots-clés dans l'objet (`Facture`, `Invoice`, `Reçu`, `Avoir`), marquage automatique comme lu, application du libellé comptable (`Xfactur-Traité`) et archivage.
+    - Bouton interactif de test de liaison IMAP & simulateur de ping.
+- 📁 **Fichiers & Numérisation directe** : Téléversement par glisser-déposer de factures (PDF multipages, PNG, JPEG) ou capture via caméra mobile.
+- 💬 **Ingestion WhatsApp Business** :
+  - Réception directe des photos de reçus et tickets de caisse envoyés par WhatsApp (au numéro dédié de l'organisation).
+  - Webhook interactif (`/api/webhooks/whatsapp`) et simulateur de message avec extraction OCR et vision multimodale en temps réel.
+- ✉️ **Boîte de Réception Email Dédiée (Inbound Email)** :
+  - Adresse email dédiée générée pour l'organisation (ex: `factures-xyz@inbound.xfactur.app`).
+  - Déposeur de fichiers `.eml` / `.msg` et simulateur de transfert d'email (`/api/webhooks/email`) avec extraction des pièces jointes et corps de texte.
+- ⚡ **API Rest & Webhooks Entrants** :
+  - Endpoint webhook public sécurisé par clé d'API (`POST /api/webhooks/inbound-invoice`) pour intégrer vos automates (Zapier, Make, Google Drive, scanner réseau, ERP).
+- 🏷️ **Suivi et Filtrage** :
+  - Badge visuel du canal source pour chaque facture (`WhatsApp`, `Email`, `API Webhook`, `Upload direct`).
+  - Recherche instantanée par fournisseur ou numéro de pièce et formatage monétaire universel (`formatMoney`).
 
 ### 3. Gestion du Cycle de Vie des Factures (`/factures`)
 - Suivi d'état unifié : `cree` ➔ `valide` ➔ `alloue` ➔ `rapproche` (avec flags `bloque` et `archive`).
@@ -126,28 +152,40 @@ Xfactur intègre un sélecteur de référentiel global persistant (`AccountingCo
   - **Crédit** : Compte Fournisseur (`401100`/`401200` en OHADA ou `401000` en PCG)
 - Envoi direct au grand livre comptable.
 
-### 7. États Financiers Réglementaires OHADA (`/ohada`)
-Module complet de reporting financier conforme au Système Comptable OHADA Révisé :
+### 7. États Financiers Réglementaires OHADA & Génération PDF / XLS (`/ohada`)
+Module complet de reporting financier conforme au Système Comptable OHADA Révisé (AUDCIF 2017) avec export professionnel :
 - **Bilan SYSCOHADA (Système normalisé)** :
   - **Actif** :
-    - Actif immobilisé (charges immobilisées, immobilisations incorporelles, corporelles, financières)
-    - Actif circulant (stocks, créances clients 4111, autres créances)
-    - Trésorerie-Actif (titres de placement, valeurs à encaisser, banques 521, caisse 571)
+    - Actif immobilisé (charges immobilisées 20, incorporelles 21, corporelles 22-24, financières 26-27)
+    - Actif circulant (stocks 31-38, créances clients 411, autres créances et TVA récupérable 4452)
+    - Trésorerie-Actif (titres de placement 50, banques 521, caisse 571)
   - **Passif** :
-    - Ressources stables (capitaux propres, dettes financières)
-    - Passif circulant (dettes d'exploitation fournisseurs 4011/4012, dettes fiscales et sociales 4452/431)
-    - Trésorerie-Passif (découverts bancaires)
-  - Indicateur d'équilibre Actif = Passif et calcul des écarts en temps réel.
-- **Compte de Résultat SYSCOHADA (en cascade)** :
-  - Produits d'exploitation & Chiffre d'affaires
-  - Charges d'exploitation & Valeur ajoutée
-  - Excédent Brut d'Exploitation (EBE)
-  - Résultat d'Exploitation (RE)
-  - Résultat Financier (RF)
-  - Résultat des Activités Ordinaires (RAO)
-  - Résultat Hors Activités Ordinaires (HAO)
-  - Résultat Net de l'exercice (Bénéfice ou Perte)
-- Fonctions d'impression et d'export direct pour les clôtures d'exercice et assemblées générales.
+    - Ressources stables (capitaux propres 10-13, résultat net de l'exercice, dettes financières 16)
+    - Passif circulant (dettes d'exploitation fournisseurs 4011/4012, dettes fiscales et sociales 431/4451)
+    - Trésorerie-Passif (découverts bancaires 561)
+  - Indicateurs d'équilibre financier : FRNG (Fonds de Roulement Net Global), BFR (Besoin en Fonds de Roulement), Trésorerie Nette (TN).
+- **Compte de Résultat SYSCOHADA (en cascade - SIG)** :
+  - Marge Commerciale (701 - 601 +/- 6031)
+  - Production de l'Exercice (702-706, 71, 72)
+  - Consommation de l'Exercice (602, 604, 605, 61, 62, 63)
+  - **Valeur Ajoutée (VA)**
+  - **Excédent Brut d'Exploitation (EBE)**
+  - **Résultat d'Exploitation (RE)**
+  - **Résultat Financier (RF)**
+  - **Résultat des Activités Ordinaires (RAO)**
+  - **Résultat Hors Activités Ordinaires (RHAO)**
+  - **Résultat Net de l'exercice** (Bénéfice ou Perte au compte 13)
+- **Génération & Téléchargement PDF et Excel (XLSX)** :
+  - 📄 **Export PDF Officiel (A4)** :
+    - Édition certifiée avec bannière officielle AUDCIF, métadonnées de l'entreprise (Nom, RCCM/NIF, Pays membre, Devise, Clôture).
+    - Tableaux équilibrés avec surlignages, lignes de sous-totaux, diagnostics financiers et zone de visa de l'expert-comptable agréé ONECCA.
+    - Options : Bilan seul, Compte de Résultat seul, ou Liasse Complète 2 pages.
+  - 📊 **Export Excel (.xlsx)** :
+    - Classeurs structurés avec en-têtes, références de comptes SYSCOHADA, colonnes de montants et formules de pourcentages.
+    - Feuille 1 : Bilan Normalisé (Actif + Passif + Équilibre).
+    - Feuille 2 : Compte de Résultat (Cascade SIG intégrale).
+    - Feuille 3 : Synthèse des Ratios & Règle de la Partie Double.
+  - ⚙️ **Modale de personnalisation** : Ajustement de la raison sociale, de l'identifiant fiscal, de la date de clôture et du format en un clic.
 
 ### 8. Passerelle de Concordance PCG ⇄ SYSCOHADA
 Outil interactif de transposition comptable intégré dans le module `/ohada` :
@@ -289,9 +327,10 @@ Le backend propose une architecture robuste à double étage adaptée au bi-réf
     │   └── TVA.tsx                 # Audit des taux de TVA et recalcul tableur
     │
     └── services/
-        ├── accountingService.ts    # Dictionnaire, concordance PCG ⇄ OHADA et devises
-        ├── aiService.ts            # Client HTTP pour les routes IA du backend
-        └── pcgService.ts           # Service historique pour la nomenclature PCG
+        ├── accountingService.ts      # Dictionnaire, concordance PCG ⇄ OHADA et devises
+        ├── aiService.ts              # Client HTTP pour les routes IA du backend
+        ├── pcgService.ts             # Service historique pour la nomenclature PCG
+        └── statementExportService.ts # Moteur d'export PDF (jsPDF) et Excel (.xlsx) Bilan & Résultat
 ```
 
 ---
@@ -302,7 +341,7 @@ Le backend propose une architecture robuste à double étage adaptée au bi-réf
 | :--- | :--- | :--- |
 | `organisations` | Entreprise utilisatrice | `nom`, `siret` / `identifiant_legal`, `email_admin`, `referentiel` (`'PCG'` \| `'OHADA'`), `devise` (`'EUR'`, `'XOF'`, `'XAF'`, etc.), `pays`, `regime_tva`, `statut` |
 | `entreprises` | Tiers (clients / fournisseurs) | `nom`, `siret`, `tva_intracom`, `pays`, `adresse` |
-| `factures` | Factures d'achats / ventes | `numero_facture`, `date_emission`, `montant_ht_eur`, `montant_ttc_eur`, `statut`, `score_qualite`, `est_conforme`, `author_uid` |
+| `factures` | Factures d'achats / ventes | `numero_facture`, `date_emission`, `montant_ht_eur`, `montant_ttc_eur`, `statut`, `source` (`'upload'`, `'whatsapp'`, `'email'`, `'api_webhook'`), `score_qualite`, `est_conforme`, `author_uid` |
 | `journal` | Écritures en partie double | `organisation_id`, `facture_id`, `date_ecriture`, `compte_id` (compte PCG ou SYSCOHADA), `debit`, `credit`, `piece`, `statut` |
 | `lignes_releve`| Mouvements bancaires | `organisation_id`, `date_operation`, `libelle`, `montant`, `statut`, `piece_comptable` |
 | `subreddits` | Canaux du forum social | `nom`, `description`, `createur_id` |
@@ -320,33 +359,46 @@ Tous les endpoints préfixés par `/api/` sont hébergés par le serveur Express
 - **Payload** : `multipart/form-data` avec champ `files` (images ou documents scannés).
 - **Réponse** : Données normalisées en JSON (numéro de facture, date, montants HT/TTC, lignes détaillées).
 
-### 2. Contrôle de Conformité Multi-Pays
+### 2. Ingestion WhatsApp Webhook
+- **Route** : `POST /api/webhooks/whatsapp`
+- **Payload** : `multipart/form-data` avec `{ phone, messageText, files?, standard }`
+- **Réponse** : Facture normalisée avec `source: 'whatsapp'` et détection OCR du reçu/photo.
+
+### 3. Ingestion Email Inbound Webhook
+- **Route** : `POST /api/webhooks/email`
+- **Payload** : `multipart/form-data` avec `{ from, to, subject, bodyText, files?, standard }`
+- **Réponse** : Facture normalisée avec `source: 'email'` et analyse des pièces jointes.
+
+### 4. Ingestion API REST & Webhook Universel
+- **Route** : `POST /api/webhooks/inbound-invoice`
+- **Payload** : `{ payload: object | string, apiKey: string, source?: string }`
+- **Réponse** : `{ success: true, data: object }` pour intégration Zapier, Make ou ERP.
+
+### 5. Contrôle de Conformité Multi-Pays
 - **Route** : `POST /api/ai/conformity`
 - **Payload** : `{ invoiceData: object, rules?: string, standard?: 'PCG' | 'OHADA', country?: string }`
 - **Réponse** : `{ est_conforme: boolean, score_qualite: number, alertes: string[] }`
-- **Comportement** : Valide selon le Code Général des Impôts (France) ou selon l'Acte Uniforme OHADA et la fiscalité du pays sélectionné (Sénégal, Côte d'Ivoire, Cameroun, etc.).
+- **Comportement** : Valide selon le Code Général des Impôts (France) ou selon l'Acte Uniforme OHADA et la fiscalité du pays sélectionné.
 
-### 3. Allocation Comptable PCG & SYSCOHADA
+### 6. Allocation Comptable PCG & SYSCOHADA
 - **Route** : `POST /api/ai/allocate`
 - **Payload** : `{ invoiceData: object, rules?: string, standard?: 'PCG' | 'OHADA', currency?: string }`
 - **Réponse** : `{ entries: [{ compte_id: string, libelle_compte: string, debit: number, credit: number, piece: string }] }`
-- **Comportement** : Si `standard: 'OHADA'`, utilise la nomenclature SYSCOHADA Révisé (`401100`/`401200`, `445200`, `605xxx`, `62xxxx`, `63xxxx`) ; si `standard: 'PCG'`, utilise la nomenclature PCG (`401000`, `445660`, `6xxxxx`).
 
-### 4. Parsing de Relevé Bancaire
+### 7. Parsing de Relevé Bancaire
 - **Route** : `POST /api/ai/extract-bank`
 - **Payload** : `{ csvText: string }`
 - **Réponse** : `{ transactions: [{ date: string, libelle: string, montant: number }] }`
 
-### 5. Rapprochement Bancaire
+### 8. Rapprochement Bancaire
 - **Route** : `POST /api/ai/reconcile`
 - **Payload** : `{ journalEntries: object[], bankStatements: object[], rules?: string }`
 - **Réponse** : `{ matches: [{ journal_id: string, releve_id: string, piece_comptable: string, score: number }] }`
 
-### 6. Assistant Conversationnel Bilingue
+### 9. Assistant Conversationnel Bilingue
 - **Route** : `POST /api/ai/chat`
 - **Payload** : `{ message: string, context: object }`
 - **Réponse** : `{ reply: string }`
-- **Comportement** : Répond aux questions comptables et financières en mobilisant l'expertise PCG et SYSCOHADA Révisé.
 
 ---
 

@@ -36,7 +36,7 @@ const navItems = [
   { to: '/social', icon: Users, label: 'Réseau Social' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/audit', icon: ClipboardCheck, label: 'Audit' },
-  { to: '/admin', icon: Settings, label: 'Admin' },
+  { to: '/admin', icon: Settings, label: 'Paramètres' },
 ];
 
 export default function Layout() {

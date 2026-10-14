@@ -130,3 +130,60 @@ export interface Comment {
   contenu: string;
   created_at: string;
 }
+
+export type WhatsAppProvider = 'qr_web' | 'meta_cloud_api' | 'twilio';
+export type EmailSyncMode = 'imap' | 'forwarding_inbound' | 'webhook_provider';
+
+export interface WhatsAppIngestionConfig {
+  enabled: boolean;
+  provider: WhatsAppProvider;
+  status: 'connected' | 'disconnected' | 'pending';
+  phoneNumber: string;
+  wabaId?: string;
+  phoneNumberId?: string;
+  metaAccessToken?: string;
+  twilioAccountSid?: string;
+  twilioAuthToken?: string;
+  twilioFromNumber?: string;
+  autoDownloadAttachments: boolean;
+  autoProcessWithAI: boolean;
+  sendAutoReply: boolean;
+  autoReplyText: string;
+  whitelistOnly: boolean;
+  whitelistedNumbers: string[];
+  defaultStandard: AccountingStandard;
+  lastSyncAt?: string;
+  inboundWebhookUrl?: string;
+  verifyToken?: string;
+}
+
+export interface EmailIngestionConfig {
+  enabled: boolean;
+  mode: EmailSyncMode;
+  status: 'connected' | 'disconnected' | 'pending';
+  dedicatedEmail: string;
+  customForwardingEmail?: string;
+  imapPreset: 'gmail' | 'outlook' | 'ovh' | 'custom';
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
+  imapUser: string;
+  imapPassword?: string;
+  imapFolder: string;
+  checkIntervalMinutes: number;
+  allowedExtensions: string[];
+  subjectFilterKeywords: string;
+  markAsReadAfterProcessing: boolean;
+  applyLabel: boolean;
+  labelText: string;
+  archiveOriginal: boolean;
+  sendDailyDigest: boolean;
+  lastSyncAt?: string;
+}
+
+export interface IngestionChannelsSettings {
+  whatsapp: WhatsAppIngestionConfig;
+  email: EmailIngestionConfig;
+  updatedAt?: string;
+}
+

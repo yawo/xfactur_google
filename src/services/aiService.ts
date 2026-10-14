@@ -89,5 +89,38 @@ export const aiService = {
   async reconcileBank(journalEntries: any[], bankStatements: any[], rules?: string) {
     const response = await axios.post('/api/ai/reconcile', { journalEntries, bankStatements, rules });
     return response.data;
+  },
+
+  async ingestWhatsApp(data: { phone?: string; messageText?: string; file?: File; standard?: string }) {
+    const formData = new FormData();
+    if (data.phone) formData.append('phone', data.phone);
+    if (data.messageText) formData.append('messageText', data.messageText);
+    if (data.standard) formData.append('standard', data.standard);
+    if (data.file) formData.append('files', data.file);
+
+    const response = await axios.post('/api/webhooks/whatsapp', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  async ingestEmail(data: { from?: string; subject?: string; bodyText?: string; file?: File; standard?: string }) {
+    const formData = new FormData();
+    if (data.from) formData.append('from', data.from);
+    if (data.subject) formData.append('subject', data.subject);
+    if (data.bodyText) formData.append('bodyText', data.bodyText);
+    if (data.standard) formData.append('standard', data.standard);
+    if (data.file) formData.append('files', data.file);
+
+    const response = await axios.post('/api/webhooks/email', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+  },
+
+  async ingestInboundApi(payload: any, apiKey?: string) {
+    const response = await axios.post('/api/webhooks/inbound-invoice', { payload, apiKey });
+    return response.data;
   }
 };
+
